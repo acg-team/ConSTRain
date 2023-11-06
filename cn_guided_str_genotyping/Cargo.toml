@@ -1,5 +1,5 @@
 [package]
-name = "CN-guided-STR-genotying"
+name = "cn-guided-str-genotying"
 version = "0.1.0"
 edition = "2021"
 
