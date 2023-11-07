@@ -5,7 +5,7 @@ use cn_guided_str_genotying;
 
 
 fn main() {
-    // USAGE: CN-guided-STR-genotying <bed file> <bam file> <threads>
+    // USAGE: cn-guided-str-genotying <bed file> <bam file> <threads>
     // EXAMPLE: ./target/debug/cn-guided-str-genotying ../data/repeats/APC_repeats.tsv ../data/alignments/patient_3.bam 4
     // EXAMPLE: cargo run -- ../data/repeats/APC_repeats.tsv ../data/alignments/patient_3.bam 4
     // Eventually make a nicer CLI using Clap crate?
@@ -16,5 +16,6 @@ fn main() {
 
     ThreadPoolBuilder::new().num_threads(*n_threads).build_global().unwrap();
 
-    cn_guided_str_genotying::alelle_lengths_from_cigar(bed_path, bam_path, 4);
+    let flanksize = 4;
+    cn_guided_str_genotying::call_tr_allele_lengths(bed_path, bam_path, flanksize);
 }
