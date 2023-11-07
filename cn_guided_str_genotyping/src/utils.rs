@@ -1,31 +1,8 @@
 pub mod io_utils;
 
-use std::{cmp, collections::HashMap};
+use std::cmp;
 
 use rust_htslib::bam::record::Cigar;
-
-#[derive(Debug, serde::Deserialize)]
-pub struct ReferenceRepeat {
-    pub seqname: String,
-    // Tandem repeat struct follows 0-based half-open coordinate system: [start, end)
-    pub start: i64,
-    pub end: i64,
-    pub period: i64,
-    pub unit: String,
-}
-
-impl ReferenceRepeat {
-    pub fn get_fetch_definition(&self) -> (&str, i64, i64) {
-        (self.seqname.as_str(), self.start, self.end)
-    }
-}
-
-#[derive(Debug)]
-pub struct TandemRepeat<'a> {
-    pub reference_info: &'a ReferenceRepeat,
-    pub is_genotyped: bool,
-    pub allele_lengths: Option<HashMap<i64, usize>>,
-}
 
 pub fn cigar_consumes_ref(cigar: &Cigar) -> bool {
     match cigar {

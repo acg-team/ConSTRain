@@ -10,3 +10,4 @@ csv = "1.3.0"
 rayon = "*"
 rust-htslib = "*"
 serde = { version = "1.0.190", features = ["derive"] }
+serde_json = "*"
