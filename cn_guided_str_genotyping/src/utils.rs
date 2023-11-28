@@ -9,7 +9,7 @@ pub struct CopyNumberVariant {
     // CNV struct follows 0-based half-open coordinate system: [start, end)
     pub start: i64,
     pub end: i64,
-    pub cn: u64,
+    pub cn: usize,
 }
 
 pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 {
