@@ -27,15 +27,18 @@ pub fn estimate_genotype(
     let mut threshold_idx = 0;
     for count in counts.iter() {
         if *count > threshold_count {
-            threshold_idx += 1;  
+            threshold_idx += 1;
         } else {
             break;
         }
     }
     if threshold_idx == 0 {
         return;
-    }    
-    counts = zero_pad_if_shorter(counts.slice_move(s![..threshold_idx]), tr_region.copy_number);
+    }
+    counts = zero_pad_if_shorter(
+        counts.slice_move(s![..threshold_idx]),
+        tr_region.copy_number,
+    );
 
     if allele_lengths.len() == 1 {
         // Only one allele length observed so we can exit early
@@ -56,7 +59,6 @@ pub fn estimate_genotype(
     //     return;
     // }
     // compositions = compositions.unwrap().clone();
-
 
     let argmin = most_likely_allele_distribution(
         &compositions,

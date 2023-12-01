@@ -53,4 +53,7 @@ impl RepeatReferenceInfo {
     pub fn get_fetch_definition(&self) -> (&str, i64, i64) {
         (self.seqname.as_str(), self.start, self.end)
     }
+    pub fn get_fetch_definition_s(&self) -> String {
+        format!("{}:{}-{}", self.seqname, self.start, self.end)
+    }
 }

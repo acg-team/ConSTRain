@@ -7,22 +7,29 @@ use crate::utils::{cigar_utils, CopyNumberVariant};
 
 use genotyping::descending_weak_compositions;
 use ndarray::{Array, Dim};
-use rust_htslib::bam::IndexedReader;
-use rust_htslib::bam::record::CigarStringView;
-use rust_htslib::bam::{self, ext::BamRecordExtensions, Read};
+use rust_htslib::{
+    bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
+    errors::Error as htsError,
+    htslib,
+};
 use std::collections::HashMap;
 
-pub fn fetch_allele_lengths(tr_region: &mut TandemRepeat, bam: &mut IndexedReader, flank: i64) {
-// pub fn fetch_allele_lengths(tr_region: &mut TandemRepeat, bam_path: &str, reference_path: &str, flank: i64) {
-    // let fetch_request = tr_region.reference_info.get_fetch_definition();    
-
-    // let mut bam = bam::IndexedReader::from_path(bam_path).unwrap();
-    // bam.set_reference(reference_path).unwrap();
-    // bam.fetch(fetch_request).unwrap();
-
+pub fn fetch_allele_lengths(
+    tr_region: &mut TandemRepeat,
+    htsfile: *mut htslib::htsFile,
+    itr: *mut htslib::hts_itr_t,
+    flank: i64,
+) {
     let mut allele_lengths: HashMap<i64, f32> = HashMap::new();
-    for record in bam.rc_records() {        
-        let record = record.unwrap();
+    let mut record = Record::new();
+    while let Some(result) = rhtslib_read(htsfile, itr, &mut record) {
+        if result.is_err() {
+            eprintln!(
+                "Faulty read for region {}",
+                tr_region.reference_info.get_fetch_definition_s()
+            );
+            continue;
+        }
 
         if record.is_duplicate() || record.is_supplementary() || record.is_quality_check_failed() {
             // Ignore duplicate, supplementary, low quality reads
@@ -34,7 +41,7 @@ pub fn fetch_allele_lengths(tr_region: &mut TandemRepeat, bam: &mut IndexedReade
             // This is not an enclosing read: skip
             continue;
         }
-        
+
         let starting_pos = record.pos();
         let tr_region_len = allele_length_from_cigar(
             &record.cigar(),
@@ -98,6 +105,9 @@ pub fn tr_cn_from_cnvs(tr_region: &mut TandemRepeat, cnv_regions: &[CopyNumberVa
     // Check how GenomicRanges R library (or bedtools?) finds range
     // overlaps between two lists of entities
     for cnv in cnv_regions {
+        if tr_region.reference_info.seqname != cnv.seqname {
+            continue;
+        }
         let overlap = utils::range_overlap(
             tr_region.reference_info.start,
             tr_region.reference_info.end - 1,
@@ -161,5 +171,42 @@ mod tests {
         let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50);
 
         assert_eq!(5, tr_region_len);
+    }
+}
+
+// Functions below that are prefixed with 'rhtslib_' are private functions in
+// rust_htslib, and are mostly copied from there to be used in this library.
+// It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading 
+// alignment files, but those structs caused segfaults when reading CRAM files (not BAM, interestingly)
+// when they were dropped, even on trivial tests. -> submit issue on GitHub?
+fn rhtslib_read(
+    htsfile: *mut htslib::htsFile,
+    itr: *mut htslib::hts_itr_t,
+    record: &mut Record,
+) -> Option<Result<(), htsError>> {
+    match rhtslib_itr_next(htsfile, itr, &mut record.inner as *mut htslib::bam1_t) {
+        -1 => None,
+        -2 => Some(Err(htsError::BamTruncatedRecord)),
+        -4 => Some(Err(htsError::BamInvalidRecord)),
+        _ => {
+            // record.set_header(Rc::clone(&self.header)); // this does not seem to be necessary?
+
+            Some(Ok(()))
+        }
+    }
+}
+
+fn rhtslib_itr_next(
+    htsfile: *mut htslib::htsFile,
+    itr: *mut htslib::hts_itr_t,
+    record: *mut htslib::bam1_t,
+) -> i32 {
+    unsafe {
+        htslib::hts_itr_next(
+            (*htsfile).fp.bgzf,
+            itr,
+            record as *mut ::std::os::raw::c_void,
+            htsfile as *mut ::std::os::raw::c_void,
+        )
     }
 }
