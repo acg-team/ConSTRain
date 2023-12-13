@@ -1,3 +1,5 @@
+use clap::{Parser, Subcommand};
+use cn_guided_str_genotying::utils::CopyNumberVariant;
 use rayon::{current_thread_index, prelude::*, ThreadPoolBuilder};
 use rust_htslib::{bam, htslib, utils};
 use std::path::Path;
@@ -8,42 +10,75 @@ use cn_guided_str_genotying::{
     utils::io_utils,
 };
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// File specifying target repeat regions. Expected format is BED3+2
+    #[arg(long)]
+    repeats: String,
+
+    /// File containing chromosome names and their base ploidies. Expected format is JSON
+    #[arg(long)]
+    ploidy: String,
+
+    /// Alignment file to estimate repeat allele lengths from. Can be BAM or CRAM
+    #[arg(long)]
+    alignment: String,
+
+    /// Copy number variants for the current alignment file. Expected format is BED3+1
+    #[arg(long)]
+    cnvs: Option<String>,
+
+    /// Reference genome. Expected format is FASTA, index file should exist right next to FASTA. Required if alignment is in CRAM format.
+    #[arg(long)]
+    reference: Option<String>,
+
+    /// Number of threads to use
+    #[arg(long, default_value_t = 1)]
+    threads: usize,
+
+    /// Size of flanking region around the target repeat that reads need to cover to be considered (both sides)
+    #[arg(long, default_value_t = 5)]
+    flanksize: usize,
+
+    /// Minimum number of reads per copy number to perform allele length estimation. E.g., reads_per_allele = 10 means at least 20 reads are needed for a locus with copynumber 2, 30 for copynumber 3 etc.
+    #[arg(long, default_value_t = 10)]
+    reads_per_allele: usize,
+}
+
 fn main() {
-    // USAGE: cn-guided-str-genotying <bed file> <ploidy file> <cnv file> <bam file> <n threads>
-    // EXAMPLE: cargo run -- ../data/repeats/APC_repeats.bed ../data/genome_architectures/h_sapiens_male.json  ../data/cnv/cnv_test.bed ../data/alignments/duplication_cn3_out1.bam 4
-    // EXAMPLE: ./target/debug/cn-guided-str-genotying ../data/repeats/APC_repeats.bed ../data/genome_architectures/h_sapiens_male.json  ../data/cnv/cnv_test.bed ../data/alignments/duplication_cn3_out1.bam 4
-    // EXAMPLE: ./target/release/cn-guided-str-genotying /Users/maxverbiest/PhD/data/str_panels/hg19/tral_and_perf_panel_hg19_reformat.bed ../data/genome_architectures/h_sapiens_male_nochr.json ../data/cnv/cnv_test.bed /Users/maxverbiest/PhD/data/alignments/big_bang_paper/GN.usc_20x.Homo_sapiens_assembly19.fasta.bam 4
-    // EXAMPLE: ./target/release/cn-guided-str-genotying /Users/maxverbiest/PhD/data/str_panels/tral_and_perf_panel_updated.bed ../data/genome_architectures/h_sapiens_female.json ../data/cnv/cnv_test.bed  /Users/maxverbiest/PhD/data/alignments/1000g/HG00138.final.cram 4
-    // EXAMPLE: ./target/release/cn-guided-str-genotying ../data/repeats/HG00138_strs_in_cnv.bed ../data/genome_architectures/h_sapiens_male.json ../data/cnv/HG00138_pgx.bed  /Users/maxverbiest/PhD/data/alignments/1000g/HG00138.final.cram 8
+    let cli = Cli::parse();
 
-    // Eventually make a nicer CLI using Clap crate?
-    let args: Vec<String> = env::args().collect();
-    let bed_path = &args[1].as_str();
-    let ploidy_path = &args[2].as_str();
-    let cnv_path = &args[3].as_str();
-    let bam_path = args[4].as_str();
-    let n_threads = &args[5].parse::<usize>().unwrap();
-
+    if cli.threads < 1 {
+        panic!("Must allow for at least one thread");
+    }
     ThreadPoolBuilder::new()
-        .num_threads(*n_threads)
+        .num_threads(cli.threads)
         .build_global()
         .unwrap();
-
-    let flanksize = 10;
-    let min_reads_per_allele = 10;
 
     // Currently, io_utils functions return all copy numbers they encounter
     // while reading data. This is then used to create compositions_map.
     // Could instead switch to Arc<RwLock<HashMap<..., ...>>> implementation
-    // where compositions_map is updated if a new copy number is encountered.
-    let (copy_numbers, mut tr_regions) = io_utils::trs_from_bed(bed_path, ploidy_path);
+    // where compositions_map is updated if a new copy number is encountered
+    // in one of the threads.
+    let (mut copy_numbers, mut tr_regions) =
+        io_utils::trs_from_bed(cli.repeats.as_ref(), cli.ploidy.as_ref());
     eprintln!("Read {} TR regions", tr_regions.len());
-    let (cnv_copy_numbers, cnv_regions) = io_utils::cnvs_from_bed(cnv_path);
-    eprintln!("Read {} CNVs", cnv_regions.len());
+
+    let mut cnv_regions: Vec<CopyNumberVariant> = Vec::new();
+    if cli.cnvs.is_some() {
+        let (cnv_copy_numbers, mut parsed_cnv_regions) =
+            io_utils::cnvs_from_bed(cli.cnvs.unwrap().as_ref());
+        cnv_regions.append(&mut parsed_cnv_regions);
+        copy_numbers.extend(cnv_copy_numbers.iter());
+        eprintln!("Read {} CNVs", cnv_regions.len());
+    }
     let copy_numbers: Vec<usize> = copy_numbers
-        .union(&cnv_copy_numbers)
+        .iter()
         .filter_map(|x| if *x <= 20 { Some(*x) } else { None })
         .collect();
+
     eprintln!(
         "Generating compositions for copy numbers {:?}",
         copy_numbers
@@ -51,41 +86,48 @@ fn main() {
     let compositions_map = Arc::new(make_compositions_map(&copy_numbers));
     eprintln!("Generated compositions");
 
-    // {
-    //     // Even this causes a segfault when reading CRAM...
-    //     eprintln!("Entering scope");
-    //     let reference = "/Users/maxverbiest/PhD/data/genomes/GRCh38.d1.vd1.fa";
-    //     let mut bam = IndexedReader::from_path(bam_path).unwrap();
-    //     bam.set_reference(reference).unwrap();
-    //     let fetch_request = tr_regions[0].reference_info.get_fetch_definition();
-    //     let fetch_result = bam.fetch(fetch_request);
-    //     eprintln!("Leaving scope");
-    // }
-    // eprintln!("Left scope");
-    
-    eprintln!("Launching {} threads for genotyping", n_threads);
-    let chunksize = tr_regions.len() / n_threads + 1;
+    eprintln!("Launching {} thread(s) for genotyping", cli.threads);
+    let chunksize = tr_regions.len() / cli.threads + 1;
+    let alignment_path = cli.alignment.as_str();
+
     tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
-        eprintln!("Launched thread {}", current_thread_index().unwrap());
-        let htsfile = rhtslib_from_path(bam_path);
+        if cli.threads > 1 {
+            eprintln!("Launched thread {}", current_thread_index().unwrap());
+        }
+        let htsfile = rhtslib_from_path(alignment_path);
         let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
-        let c_str = ffi::CString::new(bam_path).unwrap();
+        let c_str = ffi::CString::new(alignment_path).unwrap();
         let idx: *mut htslib::hts_idx_t =
             unsafe { htslib::sam_index_load(htsfile, c_str.as_ptr()) };
         if idx.is_null() {
             panic!("Unable to load index for alignment file!");
         }
 
-        let reference = "/Users/maxverbiest/PhD/data/genomes/GRCh38.d1.vd1.fa";
-        rhtslib_set_reference(htsfile, reference);
+        unsafe {
+            if htsfile
+                .as_ref()
+                .expect("Problem accessing htsfile")
+                .is_cram()
+                != 0
+            {
+                match &cli.reference {
+                    Some(reference) => rhtslib_set_reference(htsfile, reference),
+                    None => {
+                        panic!("Alignment file is CRAM format but no reference file as specified!")
+                    }
+                };
+            }
+        }
 
         for tr_region in tr_regions {
-            tr_cn_from_cnvs(tr_region, &cnv_regions);
+            if cnv_regions.len() > 0 {
+                tr_cn_from_cnvs(tr_region, &cnv_regions);
+            }
 
             let fetch_request = tr_region.reference_info.get_fetch_definition_s();
             let itr = rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes());
 
-            fetch_allele_lengths(tr_region, htsfile, itr, flanksize);
+            fetch_allele_lengths(tr_region, htsfile, itr, cli.flanksize);
 
             unsafe {
                 htslib::hts_itr_destroy(itr);
@@ -93,14 +135,16 @@ fn main() {
 
             estimate_genotype(
                 tr_region,
-                min_reads_per_allele,
+                cli.reads_per_allele,
                 Arc::clone(&compositions_map),
             );
         }
         unsafe {
             htslib::hts_close(htsfile);
         }
-        eprintln!("Finished on thread {}", current_thread_index().unwrap());
+        if cli.threads > 1 {
+            eprintln!("Finished on thread {}", current_thread_index().unwrap());
+        }
     });
 
     for r in tr_regions {
@@ -108,10 +152,9 @@ fn main() {
     }
 }
 
-
 // Functions below that are prefixed with 'rhtslib_' are private functions in
-// rust_htslib, and are mostly copied from there to be used in this binary.
-// It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading 
+// rust_htslib, and are copied from there to be used in this binary.
+// It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading
 // alignment files, but those structs caused segfaults when reading CRAM files (not BAM, interestingly)
 // when they were dropped, even on trivial tests. -> submit issue on GitHub?
 fn rhtslib_from_path<P: AsRef<Path>>(path: P) -> *mut htslib::htsFile {

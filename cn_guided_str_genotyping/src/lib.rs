@@ -18,7 +18,7 @@ pub fn fetch_allele_lengths(
     tr_region: &mut TandemRepeat,
     htsfile: *mut htslib::htsFile,
     itr: *mut htslib::hts_itr_t,
-    flank: i64,
+    flank: usize,
 ) {
     let mut allele_lengths: HashMap<i64, f32> = HashMap::new();
     let mut record = Record::new();
@@ -35,8 +35,8 @@ pub fn fetch_allele_lengths(
             // Ignore duplicate, supplementary, low quality reads
             continue;
         }
-        if record.pos() >= tr_region.reference_info.start - flank
-            || record.reference_end() <= tr_region.reference_info.end + flank
+        if record.pos() >= tr_region.reference_info.start - flank as i64
+            || record.reference_end() <= tr_region.reference_info.end + flank as i64
         {
             // This is not an enclosing read: skip
             continue;
@@ -175,8 +175,8 @@ mod tests {
 }
 
 // Functions below that are prefixed with 'rhtslib_' are private functions in
-// rust_htslib, and are mostly copied from there to be used in this library.
-// It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading 
+// rust_htslib, and are copied from there to be used in this library.
+// It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading
 // alignment files, but those structs caused segfaults when reading CRAM files (not BAM, interestingly)
 // when they were dropped, even on trivial tests. -> submit issue on GitHub?
 fn rhtslib_read(

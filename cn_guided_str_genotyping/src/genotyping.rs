@@ -15,15 +15,12 @@ pub fn estimate_genotype(
     if n_mapped_reads < min_reads_per_allele * tr_region.copy_number {
         return;
     }
-    // if !tr_region.has_coverage()
-    //     || n_mapped_reads <= min_reads_per_allele * tr_region.copy_number
-    // {
-    //     return;
-    // }
 
     let (allele_lengths, mut counts) = tr_region.allele_counts_as_ndarrays();
 
     let threshold_count = n_mapped_reads as f32 / tr_region.copy_number as f32 * 0.5;
+
+    // Determine idx of last position in counts that is higher than the threshold
     let mut threshold_idx = 0;
     for count in counts.iter() {
         if *count > threshold_count {
@@ -47,21 +44,31 @@ pub fn estimate_genotype(
         return;
     }
 
-    // let compositions = compositions_map
-    //     .get(&tr_region.copy_number)
-    //     .unwrap()
-    //     .clone();
     let compositions = match compositions_map.get(&tr_region.copy_number) {
-        Some(comp) => comp.clone(),
+        Some(comp) => comp,
         None => return,
     };
-    // if compositions.is_none() {
-    //     return;
-    // }
-    // compositions = compositions.unwrap().clone();
+
+    // TODO: determine valid rows here using threshold_idx, pass to most_likely_allele_distribution
+    // let valid_rows: Vec<usize> = compositions
+    //     .slice(s![.., ..threshold_idx])
+    //     .sum_axis(Axis(1))
+    //     .iter()
+    //     .enumerate()
+    //     .filter_map(
+    //         |(idx, val)| {
+    //             if *val as usize == tr_region.copy_number {
+    //                 Some(idx)
+    //             } else {
+    //                 None
+    //             }
+    //         },
+    //     )
+    //     .collect();
+    // let valid_compositions = compositions.select(Axis(0), &valid_rows);
 
     let argmin = most_likely_allele_distribution(
-        &compositions,
+        compositions,
         n_mapped_reads,
         tr_region.copy_number,
         &counts,
@@ -86,6 +93,26 @@ fn zero_pad_if_shorter(
     let mut padded_a = Array::<f32, _>::zeros(min_len);
     padded_a.slice_mut(s![..a.len()]).assign(&a);
     padded_a
+}
+
+fn most_likely_allele_distribution(
+    compositions: &Array<f32, Dim<[usize; 2]>>,
+    n_mapped_reads: usize,
+    copy_number: usize,
+    counts: &Array<f32, Dim<[usize; 1]>>,
+) -> usize {
+    let mut errors = compositions.mapv(|a| a * (n_mapped_reads / copy_number) as f32);
+    errors = errors - counts.slice(s![..copy_number]);
+    errors.mapv_inplace(|x| x.powi(2));
+
+    let error_sums = errors.sum_axis(Axis(1));
+    let argmin = error_sums
+        .iter()
+        .enumerate()
+        .min_by(|x, y| x.1.partial_cmp(y.1).unwrap())
+        .unwrap();
+
+    argmin.0
 }
 
 pub fn descending_weak_compositions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
@@ -141,26 +168,6 @@ pub fn descending_weak_compositions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
     Array2::from_shape_vec((n_results, n), results).unwrap()
 }
 
-fn most_likely_allele_distribution(
-    compositions: &Array<f32, Dim<[usize; 2]>>,
-    n_mapped_reads: usize,
-    copy_number: usize,
-    counts: &Array<f32, Dim<[usize; 1]>>,
-) -> usize {
-    let mut errors = compositions.mapv(|a| a * (n_mapped_reads / copy_number) as f32);
-    errors = errors - counts.slice(s![..copy_number]);
-    errors.mapv_inplace(|x| x.powi(2));
-
-    let error_sums = errors.sum_axis(Axis(1));
-    let argmin = error_sums
-        .iter()
-        .enumerate()
-        .min_by(|x, y| x.1.partial_cmp(y.1).unwrap())
-        .unwrap();
-
-    argmin.0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +207,24 @@ mod tests {
             [1., 1., 1., 1., 1.],
         ]);
         assert_eq!(arr, descending_weak_compositions(5));
+    }
+
+    #[test]
+    fn compositions_n6() {
+        let arr: Array<f32, Dim<[usize; 2]>> = arr2(&[
+            [6., 0., 0., 0., 0., 0.],
+            [5., 1., 0., 0., 0., 0.],
+            [4., 2., 0., 0., 0., 0.],
+            [4., 1., 1., 0., 0., 0.],
+            [3., 3., 0., 0., 0., 0.],
+            [3., 2., 1., 0., 0., 0.],
+            [3., 1., 1., 1., 0., 0.],
+            [2., 2., 2., 0., 0., 0.],
+            [2., 2., 1., 1., 0., 0.],
+            [2., 1., 1., 1., 1., 0.],
+            [1., 1., 1., 1., 1., 1.],
+        ]);
+        assert_eq!(arr, descending_weak_compositions(6));
     }
 
     #[test]
