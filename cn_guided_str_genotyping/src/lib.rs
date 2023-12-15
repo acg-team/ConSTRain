@@ -5,7 +5,7 @@ pub mod utils;
 use crate::repeat::TandemRepeat;
 use crate::utils::{cigar_utils, CopyNumberVariant};
 
-use genotyping::descending_weak_compositions;
+use genotyping::{descending_weak_compositions, partitions};
 use ndarray::{Array, Dim};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
@@ -134,7 +134,8 @@ pub fn make_compositions_map(
         if *cn == 0 {
             continue;
         }
-        map.insert(*cn, descending_weak_compositions(*cn as usize));
+        // map.insert(*cn, descending_weak_compositions(*cn as usize));
+        map.insert(*cn, partitions(*cn as usize));
     }
 
     map

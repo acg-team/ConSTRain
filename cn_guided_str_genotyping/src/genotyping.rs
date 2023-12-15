@@ -1,4 +1,5 @@
 use crate::repeat::TandemRepeat;
+use crate::utils::N_PARTITIONS;
 
 use ndarray::prelude::*;
 use std::{collections::HashMap, sync::Arc};
@@ -168,6 +169,40 @@ pub fn descending_weak_compositions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
     Array2::from_shape_vec((n_results, n), results).unwrap()
 }
 
+pub fn partitions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
+    // https://jeromekelleher.net/category/combinatorics
+    if n == 0 {
+        return arr2(&[[]]);
+    }
+    let mut results = Array::zeros((N_PARTITIONS[n], n));
+    let mut results_idx = N_PARTITIONS[n] - 1;
+
+    let mut a = vec![0; n + 1];
+    let mut k = 1;
+    a[1] = n;
+    while k != 0 {
+        let x = a[k - 1] + 1;
+        let mut y = a[k] - 1;
+        k -= 1;
+        while x <= y {
+            a[k] = x;
+            y -= x;
+            k += 1
+        }
+        a[k] = x + y;
+        for (i, val) in a[..k + 1].iter().rev().enumerate() {
+            results[[results_idx, i]] = *val as f32;
+        }
+
+        results_idx = match results_idx.checked_sub(1) {
+            Some(val) => val,
+            None => break,
+        }
+    }
+
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +260,56 @@ mod tests {
             [1., 1., 1., 1., 1., 1.],
         ]);
         assert_eq!(arr, descending_weak_compositions(6));
+    }
+
+    #[test]
+    fn partitions_n3() {
+        let arr: Array<f32, Dim<[usize; 2]>> = arr2(&[[3., 0., 0.], [2., 1., 0.], [1., 1., 1.]]);
+        assert_eq!(arr, partitions(3));
+    }
+
+    #[test]
+    fn partitions_n5() {
+        let arr: Array<f32, Dim<[usize; 2]>> = arr2(&[
+            [5., 0., 0., 0., 0.],
+            [3., 2., 0., 0., 0.],
+            [4., 1., 0., 0., 0.],
+            [2., 2., 1., 0., 0.],
+            [3., 1., 1., 0., 0.],
+            [2., 1., 1., 1., 0.],
+            [1., 1., 1., 1., 1.],
+        ]);
+        assert_eq!(arr, partitions(5));
+    }
+
+    #[test]
+    fn partitions_n6() {
+        let arr: Array<f32, Dim<[usize; 2]>> = arr2(&[
+            [6., 0., 0., 0., 0., 0.],
+            [3., 3., 0., 0., 0., 0.],
+            [4., 2., 0., 0., 0., 0.],
+            [2., 2., 2., 0., 0., 0.],
+            [5., 1., 0., 0., 0., 0.],
+            [3., 2., 1., 0., 0., 0.],
+            [4., 1., 1., 0., 0., 0.],
+            [2., 2., 1., 1., 0., 0.],
+            [3., 1., 1., 1., 0., 0.],
+            [2., 1., 1., 1., 1., 0.],
+            [1., 1., 1., 1., 1., 1.],
+        ]);
+        assert_eq!(arr, partitions(6));
+    }
+
+    #[test]
+    fn partitions_test() {
+        for (i, val) in N_PARTITIONS.iter().enumerate() {
+            let parts = partitions(i);
+            assert_eq!(*val, parts.shape()[0]);
+            let rowsums = parts.sum_axis(Axis(1));
+            for j in rowsums.iter() {
+                assert_eq!(i as f32, *j);
+            }
+        }
     }
 
     #[test]

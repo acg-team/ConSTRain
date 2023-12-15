@@ -24,7 +24,7 @@ impl TandemRepeat {
     ) -> (Array<i64, Dim<[usize; 1]>>, Array<f32, Dim<[usize; 1]>>) {
         let mut count_vec: Vec<(&i64, &f32)> =
             self.allele_lengths.as_ref().unwrap().iter().collect();
-        count_vec.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        count_vec.sort_unstable_by(|a, b| b.1.partial_cmp(a.1).unwrap());
 
         let allele_lengths = Array::<i64, _>::from_vec(count_vec.iter().map(|a| *a.0).collect());
         let counts = Array::<f32, _>::from_vec(count_vec.iter().map(|a| *a.1).collect());
