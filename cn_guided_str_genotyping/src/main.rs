@@ -1,12 +1,12 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use cn_guided_str_genotying::utils::CopyNumberVariant;
 use rayon::{current_thread_index, prelude::*, ThreadPoolBuilder};
 use rust_htslib::{bam, htslib, utils};
 use std::path::Path;
-use std::{env, ffi, sync::Arc};
+use std::{ffi, sync::Arc};
 
 use cn_guided_str_genotying::{
-    fetch_allele_lengths, genotyping::estimate_genotype, make_compositions_map, tr_cn_from_cnvs,
+    fetch_allele_lengths, genotyping::estimate_genotype, make_partitions_map, tr_cn_from_cnvs,
     utils::io_utils,
 };
 
@@ -50,7 +50,7 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.threads < 1 {
-        panic!("Must allow for at least one thread");
+        panic!("--threads must be at least 1");
     }
     ThreadPoolBuilder::new()
         .num_threads(cli.threads)
@@ -58,9 +58,9 @@ fn main() {
         .unwrap();
 
     // Currently, io_utils functions return all copy numbers they encounter
-    // while reading data. This is then used to create compositions_map.
+    // while reading data. This is then used to create partitions_map.
     // Could instead switch to Arc<RwLock<HashMap<..., ...>>> implementation
-    // where compositions_map is updated if a new copy number is encountered
+    // where partitions_map is updated if a new copy number is encountered
     // in one of the threads.
     let (mut copy_numbers, mut tr_regions) =
         io_utils::trs_from_bed(cli.repeats.as_ref(), cli.ploidy.as_ref());
@@ -80,11 +80,11 @@ fn main() {
         .collect();
 
     eprintln!(
-        "Generating compositions for copy numbers {:?}",
+        "Generating partitions for copy numbers {:?}",
         copy_numbers
     );
-    let compositions_map = Arc::new(make_compositions_map(&copy_numbers));
-    eprintln!("Generated compositions");
+    let partitions_map = Arc::new(make_partitions_map(&copy_numbers));
+    eprintln!("Generated partitions");
 
     eprintln!("Launching {} thread(s) for genotyping", cli.threads);
     let chunksize = tr_regions.len() / cli.threads + 1;
@@ -136,7 +136,7 @@ fn main() {
             estimate_genotype(
                 tr_region,
                 cli.reads_per_allele,
-                Arc::clone(&compositions_map),
+                Arc::clone(&partitions_map),
             );
         }
         unsafe {

@@ -59,3 +59,7 @@ pub fn cnvs_from_bed(cnv_path: &str) -> (HashSet<usize>, Vec<CopyNumberVariant>)
 
     (copy_numbers, cnv_regions)
 }
+
+pub fn trs_to_vcf(tr_regions: &[TandemRepeat]) {
+
+}

@@ -5,7 +5,7 @@ pub mod utils;
 use crate::repeat::TandemRepeat;
 use crate::utils::{cigar_utils, CopyNumberVariant};
 
-use genotyping::{descending_weak_compositions, partitions};
+use genotyping::partitions;
 use ndarray::{Array, Dim};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
@@ -126,7 +126,7 @@ pub fn tr_cn_from_cnvs(tr_region: &mut TandemRepeat, cnv_regions: &[CopyNumberVa
     }
 }
 
-pub fn make_compositions_map(
+pub fn make_partitions_map(
     copy_numbers: &[usize],
 ) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
     let mut map: HashMap<usize, Array<f32, Dim<[usize; 2]>>> = HashMap::new();
@@ -134,7 +134,6 @@ pub fn make_compositions_map(
         if *cn == 0 {
             continue;
         }
-        // map.insert(*cn, descending_weak_compositions(*cn as usize));
         map.insert(*cn, partitions(*cn as usize));
     }
 
@@ -191,7 +190,6 @@ fn rhtslib_read(
         -4 => Some(Err(htsError::BamInvalidRecord)),
         _ => {
             // record.set_header(Rc::clone(&self.header)); // this does not seem to be necessary?
-
             Some(Ok(()))
         }
     }
