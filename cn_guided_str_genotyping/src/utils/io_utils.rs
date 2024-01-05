@@ -1,4 +1,7 @@
 use csv::ReaderBuilder;
+use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Writer};
+// use rust_htslib::bcf::header::Header;
+// use rust_htslib::bcf::record::GenotypeAllele;
 use serde_json::Value;
 use std::{collections::HashSet, fs::File, io::BufReader};
 
@@ -60,6 +63,115 @@ pub fn cnvs_from_bed(cnv_path: &str) -> (HashSet<usize>, Vec<CopyNumberVariant>)
     (copy_numbers, cnv_regions)
 }
 
-pub fn trs_to_vcf(tr_regions: &[TandemRepeat]) {
+pub fn trs_to_vcf(
+    tr_regions: &[TandemRepeat],
+    targets: &[&[u8]],
+    lengths: &[u64],
+    sample_name: &str,
+) {
+    // Create VCF header, populate with contigs, INFO, FORMAT lines, and sample name
+    let mut header = Header::new();
+    for (target, length) in targets.iter().zip(lengths.iter()) {
+        let target_str = std::str::from_utf8(*target).expect("Error parsing contig name!");
+        let header_contig_line = format!(r#"##contig=<ID={},length={}>"#, target_str, length);
+        header.push_record(header_contig_line.as_bytes());
+    }
 
+    for header_info_line in VCF_INFO_LINES.iter() {
+        header.push_record(header_info_line);
+    }
+    for header_format_line in VCF_FORMAT_LINES.iter() {
+        header.push_record(header_format_line);
+    }
+    header.push_sample(sample_name.as_bytes());
+
+    // Write uncompressed VCF to stdout with above header and get an empty record
+    let mut vcf = Writer::from_stdout(&header, true, Format::Vcf).unwrap();    
+    for tr_region in tr_regions {
+        // Create record for repeat and add reference information
+        let mut record = vcf.empty_record();
+        let rid = vcf
+            .header()
+            .name2rid(tr_region.reference_info.seqname.as_bytes())
+            .expect("Failed to set reference ID");
+        let ref_len = tr_region.reference_info.get_reference_len() as usize;
+        record.set_rid(Some(rid));
+        record.set_pos(tr_region.reference_info.start as i64);
+
+        record
+            .push_info_integer(b"END", &[tr_region.reference_info.end as i32])
+            .expect("Failed to set END format field");
+        record
+            .push_info_string(b"RU", &[tr_region.reference_info.unit.as_bytes()])
+            .expect("Failed to set RU format field");
+        record
+            .push_info_integer(b"PERIOD", &[tr_region.reference_info.period as i32])
+            .expect("Failed to set PERIOD format field");
+        record
+            .push_info_integer(b"REF", &[ref_len as i32])
+            .expect("Failed to set REF format field");
+
+        // Using the estimated genotype for this locus, create the alleles and genotype string to add to the VCF
+        let ref_allele = tr_region.reference_info.unit.repeat(ref_len);
+        let mut alleles = vec![ref_allele];
+        let mut genotype: Vec<GenotypeAllele> = Vec::new();
+        match &tr_region.genotype {
+            None => genotype.push(GenotypeAllele::UnphasedMissing), // No genotype estimated for repeat
+            Some(gts) => {
+                for gt in gts {
+                    let len = gt.0 as i32;
+                    let n_observed = gt.1 as i32;
+                    if len == ref_len as i32 {
+                        // Reference allele always has to be first
+                        // Add this genotype as many times as it was estimated to be present
+                        for _ in 0..n_observed {
+                            genotype.insert(0, GenotypeAllele::Unphased(0));
+                        }
+                        continue;
+                    }
+                    // Add this genotype as many times as it was estimated to be present
+                    for _ in 0..n_observed {
+                        genotype.push(GenotypeAllele::Unphased((alleles.len()) as i32));
+                    }
+                    let allele = tr_region.reference_info.unit.repeat(len as usize);
+                    alleles.push(allele);
+                }
+            }
+        }
+        let alleles = Vec::from_iter(alleles.iter().map(|i| i.as_bytes()));
+        record.set_alleles(&alleles).expect("Failed to set alleles");
+        record
+            .push_genotypes(&genotype)
+            .expect("Failed to set genotype");
+
+        // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
+        record
+            .push_format_integer(b"CN", &[tr_region.copy_number as i32])
+            .expect("Failed to set copy number");
+        let allele_freqs: Vec<String> = tr_region
+            .allele_freqs_as_tuples()
+            .iter()
+            .map(|i| format!("{},{}", i.0, i.1))
+            .collect();
+        let allele_freqs = allele_freqs.join("|");
+        record
+            .push_format_string(b"FREQS", &[allele_freqs.as_bytes()])
+            .expect("Failed to set allele frequencies");
+
+        // Write record
+        vcf.write(&record).unwrap()
+    }
 }
+
+const VCF_INFO_LINES: &'static [&[u8]] = &[
+    br#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of reference allele">"#,
+    br#"##INFO=<ID=RU,Number=1,Type=String,Description="Repeat motif">"#,
+    br#"##INFO=<ID=PERIOD,Number=1,Type=Integer,Description="Repeat period (length of motif)">"#,
+    br#"##INFO=<ID=REF,Number=1,Type=Float,Description="Repeat allele length in reference">"#,
+];
+
+const VCF_FORMAT_LINES: &'static [&[u8]] = &[
+    br#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#,
+    br#"##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Copy number">"#,
+    br#"##FORMAT=<ID=FREQS,Number=1,Type=String,Description="Frequencies observed for each allele length. Keys are number of copies and values show number of reads with that many copies.">"#,
+];

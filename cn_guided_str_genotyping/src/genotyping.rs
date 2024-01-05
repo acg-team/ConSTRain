@@ -18,19 +18,15 @@ pub fn estimate_genotype(
         return;
     }
 
-    let (allele_lengths, mut counts) = tr_region.allele_counts_as_ndarrays();
+    let (allele_lengths, mut counts) = tr_region.allele_freqs_as_ndarrays(Some("freq"));
     // might need this error_constant at some point if trying to infer the CN from read distribution
     // let mut error_constant = 0.;
     if counts.len() < tr_region.copy_number {
-        counts = zero_pad_if_shorter(
-            counts,
-            tr_region.copy_number,
-        );
+        counts = zero_pad_if_shorter(counts, tr_region.copy_number);
     } else if counts.len() > tr_region.copy_number {
         // error_constant += counts.slice(s![tr_region.copy_number..]).sum();
         counts = counts.slice_move(s![..tr_region.copy_number]);
     }
-    
 
     let partitions = match partitions_map.get(&tr_region.copy_number) {
         Some(comp) => comp,
@@ -42,12 +38,12 @@ pub fn estimate_genotype(
 
     if valid_partition_idxs.len() == 0 {
         // Not a single allele length observed with frequency over threshold, refuse to estimate
-        return;        
+        return;
     } else if valid_partition_idxs.len() == 1 {
         // Only one allele length observed with frequency over threshold, we can exit early
         let genotype: Vec<(i64, f32)> = vec![(allele_lengths[0], tr_region.copy_number as f32)];
         tr_region.genotype = Some(genotype);
-        return; 
+        return;
     }
 
     let valid_partitions = partitions.select(Axis(0), &valid_partition_idxs);
@@ -60,11 +56,12 @@ pub fn estimate_genotype(
     );
     let allele_distribution = valid_partitions.slice(s![argmin, ..]);
 
-    let genotype: Vec<(i64, f32)> = allele_lengths
+    let mut genotype: Vec<(i64, f32)> = allele_lengths
         .iter()
         .zip(allele_distribution.iter())
         .filter_map(|(x, y)| if *y > 0. { Some((*x, *y)) } else { None })
         .collect();
+    genotype.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     tr_region.genotype = Some(genotype);
 }
 

@@ -19,17 +19,44 @@ impl TandemRepeat {
     pub fn set_cn(&mut self, new_cn: usize) {
         self.copy_number = new_cn
     }
-    pub fn allele_counts_as_ndarrays(
+    pub fn allele_freqs_as_ndarrays(
         &self,
+        sort_by: Option<&str>,
     ) -> (Array<i64, Dim<[usize; 1]>>, Array<f32, Dim<[usize; 1]>>) {
         let mut count_vec: Vec<(&i64, &f32)> =
             self.allele_lengths.as_ref().unwrap().iter().collect();
-        count_vec.sort_unstable_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        match sort_by {
+            Some(by) => {
+                if by == "freq" {
+                    count_vec.sort_unstable_by(|a, b| b.1.partial_cmp(a.1).unwrap())
+                } else if by == "len" {
+                    count_vec.sort_unstable_by(|a, b| a.0.cmp(b.0))
+                } else {
+                    panic!("sort_by must be 'freq' or 'len' (or None)!")
+                }
+            }
+            None => (),
+        };
 
         let allele_lengths = Array::<i64, _>::from_vec(count_vec.iter().map(|a| *a.0).collect());
         let counts = Array::<f32, _>::from_vec(count_vec.iter().map(|a| *a.1).collect());
 
         return (allele_lengths, counts);
+    }
+    pub fn allele_freqs_as_tuples(&self) -> Vec<(i64, f32)> {
+        if self.allele_lengths.is_none() {
+            let vec = Vec::<(i64, f32)>::new();
+            return vec;
+        }
+        let mut count_vec: Vec<(i64, f32)> = Vec::from_iter(
+            self.allele_lengths
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|i| (i.0.clone(), i.1.clone())),
+        );
+        count_vec.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        count_vec
     }
     pub fn get_n_mapped_reads(&self) -> Option<usize> {
         match &self.allele_lengths {
@@ -55,5 +82,14 @@ impl RepeatReferenceInfo {
     }
     pub fn get_fetch_definition_s(&self) -> String {
         format!("{}:{}-{}", self.seqname, self.start, self.end)
+    }
+    pub fn get_reference_len(&self) -> i64 {
+        if (self.end - self.start) % self.period != 0 {
+            panic!(
+                "Start and end positions for repeat '{}' are not compatible with the period!",
+                self.get_fetch_definition_s()
+            );
+        }
+        (self.end - self.start) / self.period
     }
 }

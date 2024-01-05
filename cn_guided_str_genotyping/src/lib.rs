@@ -126,9 +126,7 @@ pub fn tr_cn_from_cnvs(tr_region: &mut TandemRepeat, cnv_regions: &[CopyNumberVa
     }
 }
 
-pub fn make_partitions_map(
-    copy_numbers: &[usize],
-) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
+pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
     let mut map: HashMap<usize, Array<f32, Dim<[usize; 2]>>> = HashMap::new();
     for cn in copy_numbers {
         if *cn == 0 {

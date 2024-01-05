@@ -1,6 +1,7 @@
 use clap::Parser;
 use cn_guided_str_genotying::utils::CopyNumberVariant;
 use rayon::{current_thread_index, prelude::*, ThreadPoolBuilder};
+use rust_htslib::bam::HeaderView;
 use rust_htslib::{bam, htslib, utils};
 use std::path::Path;
 use std::{ffi, sync::Arc};
@@ -20,6 +21,10 @@ struct Cli {
     /// File containing chromosome names and their base ploidies. Expected format is JSON
     #[arg(long)]
     ploidy: String,
+
+    /// Sample name
+    #[arg(long)]
+    sample: Option<String>,
 
     /// Alignment file to estimate repeat allele lengths from. Can be BAM or CRAM
     #[arg(long)]
@@ -52,6 +57,23 @@ fn main() {
     if cli.threads < 1 {
         panic!("--threads must be at least 1");
     }
+
+    let sample_name = match cli.sample {
+        Some(name) => name,
+        None => {
+            let name = Path::new(&cli.alignment)
+                .file_stem()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            eprintln!(
+                "Sample name not specified. Using inferred sample name: {}",
+                name
+            );
+            String::from(name)
+        }
+    };
+
     ThreadPoolBuilder::new()
         .num_threads(cli.threads)
         .build_global()
@@ -79,10 +101,7 @@ fn main() {
         .filter_map(|x| if *x <= 20 { Some(*x) } else { None })
         .collect();
 
-    eprintln!(
-        "Generating partitions for copy numbers {:?}",
-        copy_numbers
-    );
+    eprintln!("Generating partitions for copy numbers {:?}", copy_numbers);
     let partitions_map = Arc::new(make_partitions_map(&copy_numbers));
     eprintln!("Generated partitions");
 
@@ -113,7 +132,7 @@ fn main() {
                 match &cli.reference {
                     Some(reference) => rhtslib_set_reference(htsfile, reference),
                     None => {
-                        panic!("Alignment file is CRAM format but no reference file as specified!")
+                        panic!("Alignment file is CRAM format but no reference file is specified!")
                     }
                 };
             }
@@ -133,13 +152,10 @@ fn main() {
                 htslib::hts_itr_destroy(itr);
             }
 
-            estimate_genotype(
-                tr_region,
-                cli.reads_per_allele,
-                Arc::clone(&partitions_map),
-            );
+            estimate_genotype(tr_region, cli.reads_per_allele, Arc::clone(&partitions_map));
         }
         unsafe {
+            // htslib::sam_hdr_destroy(header);
             htslib::hts_close(htsfile);
         }
         if cli.threads > 1 {
@@ -147,15 +163,32 @@ fn main() {
         }
     });
 
-    for r in tr_regions {
-        println!("{:?}", r);
+    let htsfile = rhtslib_from_path(alignment_path);
+    let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
+    let hview = HeaderView::new(header);
+
+    let mut target_lengths = Vec::<u64>::new();
+    for target in hview.target_names().iter() {
+        target_lengths.push(hview.target_len(hview.tid(target).unwrap()).unwrap());
+    }
+
+    io_utils::trs_to_vcf(
+        &tr_regions,
+        &hview.target_names(),
+        &target_lengths,
+        &sample_name,
+    );
+
+    unsafe {
+        // htslib::sam_hdr_destroy(header);
+        htslib::hts_close(htsfile);
     }
 }
 
 // Functions below that are prefixed with 'rhtslib_' are private functions in
-// rust_htslib, and are copied from there to be used in this binary.
+// rust_htslib and are copied from there to be used in this binary.
 // It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading
-// alignment files, but those structs caused segfaults when reading CRAM files (not BAM, interestingly)
+// alignment files, but those structs cause segfaults when reading CRAM files (not BAM, interestingly)
 // when they were dropped, even on trivial tests. -> submit issue on GitHub?
 fn rhtslib_from_path<P: AsRef<Path>>(path: P) -> *mut htslib::htsFile {
     let htsfile: *mut htslib::htsFile =
