@@ -163,6 +163,7 @@ fn main() {
         }
     });
 
+    // TODO: utility function for getting target names & lengths from alignment file
     let htsfile = rhtslib_from_path(alignment_path);
     let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
     let hview = HeaderView::new(header);
