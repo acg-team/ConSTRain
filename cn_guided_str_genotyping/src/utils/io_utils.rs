@@ -98,6 +98,7 @@ const VCF_FORMAT_LINES: &'static [&[u8]] = &[
     br#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#,
     br#"##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Copy number">"#,
     br#"##FORMAT=<ID=FREQS,Number=1,Type=String,Description="Frequencies observed for each allele length. Keys are allele lengths and values are the number of reads with that allele length.">"#,
+    br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in number of copies of the repeat motif">"#,
 ];
 
 fn make_vcf_header(targets: &[&[u8]], lengths: &[u64], sample_name: &str) -> Header {
@@ -192,6 +193,15 @@ fn add_additional_info(record: &mut Record, tr_region: &TandemRepeat) {
     record
         .push_format_string(b"FREQS", &[allele_freqs.as_bytes()])
         .expect("Failed to set allele frequencies");
+    let gt_as_allele_lens: Vec<String> = tr_region
+        .gt_as_allele_lengths()
+        .iter()
+        .map(|i| i.to_string())
+        .collect();
+    let gt_as_allele_lens = gt_as_allele_lens.join(",");
+    record
+        .push_format_string(b"REPCN", &[gt_as_allele_lens.as_bytes()])
+        .expect("Failed to set genotype as allele lengths");
 }
 
 #[cfg(test)]

@@ -58,6 +58,20 @@ impl TandemRepeat {
         count_vec.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         count_vec
     }
+    pub fn gt_as_allele_lengths(&self) -> Vec<i64> {
+        match &self.genotype {
+            None => Vec::new(),
+            Some(genotype) => {
+                let mut allele_lens: Vec<i64> = Vec::new();
+                for allele in genotype {
+                    for _ in 0..allele.1 as usize {
+                        allele_lens.push(allele.0)
+                    }
+                }
+                allele_lens
+            }
+        }
+    }
     pub fn get_n_mapped_reads(&self) -> Option<usize> {
         match &self.allele_lengths {
             Some(allele_lengths) => Some(allele_lengths.values().sum::<f32>() as usize),
