@@ -17,6 +17,7 @@ pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 
 }
 
 // Number of partitions that exist for integers 0 - 50 (see https://oeis.org/A000041)
+// For 0 - 1000, see here: https://oeis.org/A000041/b000041.txt
 pub const N_PARTITIONS: &'static [usize] = &[
     1, 1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627, 792,
     1002, 1255, 1575, 1958, 2436, 3010, 3718, 4565, 5604, 6842, 8349, 10143, 12310, 14883, 17977,

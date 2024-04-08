@@ -109,6 +109,22 @@ fn main() {
     let chunksize = tr_regions.len() / cli.threads + 1;
     let alignment_path = cli.alignment.as_str();
 
+    // Prepare Header and target lengths for output file
+    // TODO: utility function for getting target names & lengths from alignment file
+    let htsfile = rhtslib_from_path(alignment_path);
+    let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
+    let hview = HeaderView::new(header);
+
+    unsafe {
+        // htslib::sam_hdr_destroy(header);
+        htslib::hts_close(htsfile);
+    }
+
+    let mut target_lengths = Vec::<u64>::new();
+    for target in hview.target_names().iter() {
+        target_lengths.push(hview.target_len(hview.tid(target).unwrap()).unwrap());
+    }
+
     tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
         if cli.threads > 1 {
             eprintln!("Launched thread {}", current_thread_index().unwrap());
@@ -161,17 +177,7 @@ fn main() {
         if cli.threads > 1 {
             eprintln!("Finished on thread {}", current_thread_index().unwrap());
         }
-    });
-
-    // TODO: utility function for getting target names & lengths from alignment file
-    let htsfile = rhtslib_from_path(alignment_path);
-    let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
-    let hview = HeaderView::new(header);
-
-    let mut target_lengths = Vec::<u64>::new();
-    for target in hview.target_names().iter() {
-        target_lengths.push(hview.target_len(hview.tid(target).unwrap()).unwrap());
-    }
+    });    
 
     io_utils::trs_to_vcf(
         &tr_regions,
@@ -179,11 +185,6 @@ fn main() {
         &target_lengths,
         &sample_name,
     );
-
-    unsafe {
-        // htslib::sam_hdr_destroy(header);
-        htslib::hts_close(htsfile);
-    }
 }
 
 // Functions below that are prefixed with 'rhtslib_' are private functions in
