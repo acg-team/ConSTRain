@@ -10,6 +10,6 @@ clap = { version = "4.4.11", features = ["derive"] }
 csv = "1.3.0"
 ndarray = "0.15.6"
 rayon = "*"
-rust-htslib = "*"
+rust-htslib = { version = "*", default-features = false, features = ["bzip2", "lzma"] }
 serde = { version = "1.0.190", features = ["derive"] }
 serde_json = "*"
