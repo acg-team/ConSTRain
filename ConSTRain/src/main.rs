@@ -1,12 +1,12 @@
 use clap::Parser;
-use cn_guided_str_genotying::utils::CopyNumberVariant;
+use ConSTRain::utils::CopyNumberVariant;
 use rayon::{current_thread_index, prelude::*, ThreadPoolBuilder};
 use rust_htslib::bam::HeaderView;
 use rust_htslib::{bam, htslib, utils};
 use std::path::Path;
 use std::{ffi, sync::Arc};
 
-use cn_guided_str_genotying::{
+use ConSTRain::{
     fetch_allele_lengths, genotyping::estimate_genotype, make_partitions_map, tr_cn_from_cnvs,
     utils::io_utils,
 };
