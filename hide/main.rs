@@ -3,12 +3,11 @@ use constrain::utils::CopyNumberVariant;
 use rayon::{current_thread_index, prelude::*, ThreadPoolBuilder};
 use rust_htslib::bam::HeaderView;
 use rust_htslib::{bam, htslib, utils};
-use std::path::Path;
-use std::{ffi, sync::Arc};
+use std::{error::Error, ffi, path::Path, sync::Arc};
 
 use constrain::{
     fetch_allele_lengths, genotyping::estimate_genotype, make_partitions_map, tr_cn_from_cnvs,
-    utils::io_utils,
+    utils::{sample_name_from_path, io_utils},
 };
 
 #[derive(Parser)]
@@ -47,11 +46,11 @@ struct Cli {
     flanksize: usize,
 
     /// Minimum number of reads per copy number to perform allele length estimation. E.g., reads_per_allele = 10 means at least 20 reads are needed for a locus with copynumber 2, 30 for copynumber 3 etc.
-    #[arg(long, default_value_t = 10)]
+    #[arg(long, default_value_t = 0)]
     reads_per_allele: usize,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     if cli.threads < 1 {
@@ -61,11 +60,7 @@ fn main() {
     let sample_name = match cli.sample {
         Some(name) => name,
         None => {
-            let name = Path::new(&cli.alignment)
-                .file_stem()
-                .unwrap()
-                .to_str()
-                .unwrap();
+            let name = sample_name_from_path(&cli.alignment)?;
             eprintln!(
                 "Sample name not specified. Using inferred sample name: {}",
                 name
@@ -177,7 +172,7 @@ fn main() {
         if cli.threads > 1 {
             eprintln!("Finished on thread {}", current_thread_index().unwrap());
         }
-    });    
+    });
 
     io_utils::trs_to_vcf(
         &tr_regions,
@@ -185,6 +180,8 @@ fn main() {
         &target_lengths,
         &sample_name,
     );
+
+    Ok(())
 }
 
 // Functions below that are prefixed with 'rhtslib_' are private functions in

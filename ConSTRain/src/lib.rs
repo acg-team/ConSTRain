@@ -118,7 +118,7 @@ pub fn tr_cn_from_cnvs(tr_region: &mut TandemRepeat, cnv_regions: &[CopyNumberVa
             tr_region.set_cn(cnv.cn);
             return;
         } else if overlap > 0 {
-            // TR partially overlaps CNV, impossible to set sensible CN for TR, so set to 0 so it gets skipped
+            // TR partially overlaps CNV, impossible to set sensible CN for TR. Set to 0 so it gets skipped
             // Not strictly correct, maybe add this concept explicitly to TandemRepeat
             tr_region.set_cn(0);
             return;

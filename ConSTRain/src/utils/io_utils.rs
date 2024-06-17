@@ -1,25 +1,38 @@
 use csv::ReaderBuilder;
 use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer};
 use serde_json::Value;
-use std::{collections::HashSet, fs::File, io::BufReader};
+use std::{collections::HashSet, error::Error, fs::File, io::BufReader};
 
 use crate::repeat::{RepeatReferenceInfo, TandemRepeat};
 use crate::utils::CopyNumberVariant;
 
-pub fn trs_from_bed(bed_path: &str, ploidy_path: &str) -> (HashSet<usize>, Vec<TandemRepeat>) {
-    let ploidy = ploidy_from_json(ploidy_path);
+/// Read tandem repeat regions specified in the bed file at `bed_path` into `tr_buffer`.
+/// Copy numbers of tandem repeats are set based on the values specified in `ploidy_path`, which should be a 
+/// json file mapping contig identifiers to copy number values. All copy number values that are observed while 
+/// reading TR regions are added to `cn_buffer`, which can be useful later to generate partitions for only the
+/// relevant (i.e., observed) copy numbers.
+pub fn trs_from_bed(
+    bed_path: &str,
+    ploidy_path: &str,
+    tr_buffer: &mut Vec<TandemRepeat>,
+    cn_buffer: &mut HashSet<usize>,
+) -> Result<(), Box<dyn Error>> {
+    let ploidy = ploidy_from_json(ploidy_path)?;
 
-    let mut tr_regions = Vec::new();
     let mut bed_reader = ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
-        .from_path(bed_path)
-        .unwrap();
+        .from_path(bed_path)?;
 
-    let mut copy_numbers: HashSet<usize> = HashSet::new();
     for result in bed_reader.deserialize() {
-        let ref_info: RepeatReferenceInfo = result.unwrap();
-        let cn = ploidy[ref_info.seqname.as_str()].as_u64().unwrap_or(0) as usize;
+        let ref_info: RepeatReferenceInfo = result?;
+
+        // Get base copy number of contig from ploidy json.
+        // If the contig does not exist in the json, default to CN 0 (which means TRs on this contig won't be genotyped)
+        let cn = ploidy[&ref_info.seqname].as_u64().unwrap_or(0) as usize;
+        if cn == 0 {
+            eprintln!("WARNING: contig for TR '{}' was not found in the ploidy json file. Setting CN to 0", ref_info.get_fetch_definition_s())
+        }
 
         let tr_region = TandemRepeat {
             reference_info: ref_info,
@@ -27,40 +40,51 @@ pub fn trs_from_bed(bed_path: &str, ploidy_path: &str) -> (HashSet<usize>, Vec<T
             allele_lengths: None,
             genotype: None,
         };
-
-        copy_numbers.insert(cn);
-        tr_regions.push(tr_region);
+        cn_buffer.insert(cn);
+        tr_buffer.push(tr_region);
     }
 
-    (copy_numbers, tr_regions)
+    Ok(())
 }
 
-fn ploidy_from_json(path: &str) -> Value {
-    let file = File::open(path).unwrap();
+/// Read contig-level baseline copy number values from a json file at `path`.
+/// The json should contain contig names as keys and integer copy numbers as values, e.g.:
+/// ```
+/// {
+///     "chr1": 2,
+///     ... other chromosomes ...
+///     "chrY": 0
+/// }
+/// ```
+fn ploidy_from_json(path: &str) -> Result<Value, Box<dyn Error>> {
+    let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let v: Value = serde_json::from_reader(reader).unwrap();
-
-    v
+    Ok(serde_json::from_reader(reader)?)
 }
 
-pub fn cnvs_from_bed(cnv_path: &str) -> (HashSet<usize>, Vec<CopyNumberVariant>) {
-    let mut cnv_regions = Vec::new();
+/// Read copy number variants specified in the bed file at `cnv_path` into `cnv_buffer`.
+/// All copy number values that are observed while reading TR regions are added to `cn_buffer`, 
+/// which can be useful later to generate partitions for only the relevant (i.e., observed) copy numbers.
+pub fn cnvs_from_bed(
+    cnv_path: &str,
+    cnv_buffer: &mut Vec<CopyNumberVariant>,
+    cn_buffer: &mut HashSet<usize>,
+) -> Result<(), Box<dyn Error>> {
     let mut bed_reader = ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
-        .from_path(cnv_path)
-        .unwrap();
+        .from_path(cnv_path)?;
 
-    let mut copy_numbers: HashSet<usize> = HashSet::new();
     for result in bed_reader.deserialize() {
-        let cnv: CopyNumberVariant = result.unwrap();
-        copy_numbers.insert(cnv.cn);
-        cnv_regions.push(cnv);
+        let cnv: CopyNumberVariant = result?;
+        cn_buffer.insert(cnv.cn);
+        cnv_buffer.push(cnv);
     }
 
-    (copy_numbers, cnv_regions)
+    Ok(())
 }
 
+/// Write (genotyped) tandem repeat regions to a vcf file. 
 pub fn trs_to_vcf(
     tr_regions: &[TandemRepeat],
     targets: &[&[u8]],
@@ -101,8 +125,9 @@ const VCF_FORMAT_LINES: &'static [&[u8]] = &[
     br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in number of copies of the repeat motif">"#,
 ];
 
+/// Construct VCF a header. First, include information about the target contigs, followed by the [VCF_INFO_LINES] and [VCF_FORMAT_LINES].
+/// Then, write TR variant calls to stdout.
 fn make_vcf_header(targets: &[&[u8]], lengths: &[u64], sample_name: &str) -> Header {
-    // Create VCF header, populate with contigs, INFO, FORMAT lines, and sample name
     let mut header = Header::new();
 
     for (target, length) in targets.iter().zip(lengths.iter()) {
