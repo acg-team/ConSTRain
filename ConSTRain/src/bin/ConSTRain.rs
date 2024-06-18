@@ -49,7 +49,7 @@ struct Cli {
     #[arg(long, default_value_t = 5)]
     flanksize: usize,
 
-    /// Minimum number of reads per copy number to perform allele length estimation. E.g., reads_per_allele = 10 means at least 20 reads are needed for a locus with copynumber 2, 30 for copynumber 3 etc.
+    /// Minimum number of reads per copy number to perform allele length estimation. E.g., `reads_per_allele` = 10 means at least 20 reads are needed for a locus with copynumber 2, 30 for copynumber 3 etc.
     #[arg(long, default_value_t = 0)]
     reads_per_allele: usize,
 }
@@ -57,9 +57,7 @@ struct Cli {
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
-    if cli.threads < 1 {
-        panic!("--threads must be at least 1");
-    }
+    assert!(cli.threads >= 1, "--threads must be at least 1");
 
     let sample_name = match cli.sample {
         Some(name) => name,
@@ -87,7 +85,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut tr_regions: Vec<TandemRepeat> = Vec::new();
     io_utils::trs_from_bed(&cli.repeats, &cli.ploidy, &mut tr_regions, &mut copy_numbers)?;
     eprintln!("Read {} TR regions", tr_regions.len());
-    eprintln!("{:?}", copy_numbers);
 
     let mut cnv_regions: Vec<CopyNumberVariant> = Vec::new();
     match cli.cnvs {
@@ -108,12 +105,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("Generated partitions");
 
     eprintln!("Launching {} thread(s) for genotyping", cli.threads);
-    let chunksize = tr_regions.len() / cli.threads + 1;
+    // let chunksize = tr_regions.len() / cli.threads + 1;
     let alignment_path = cli.alignment.as_str();
 
     // Prepare Header and target lengths for output file
     // TODO: utility function for getting target names & lengths from alignment file
-    let htsfile = rhtslib_from_path(alignment_path);
+    // let htsfile = rhtslib_from_path(alignment_path);
+    let htsfile = rhtslib_from_path(&cli.alignment);
     let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
     let hview = HeaderView::new(header);
 
@@ -127,6 +125,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         target_lengths.push(hview.target_len(hview.tid(target).unwrap()).unwrap());
     }
 
+    let chunksize = tr_regions.len() / cli.threads + 1;
     tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
         if cli.threads > 1 {
             eprintln!("Launched thread {}", current_thread_index().unwrap());
@@ -186,7 +185,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &hview.target_names(),
         &target_lengths,
         &sample_name,
-    );
+    )?;
 
     Ok(())
 }

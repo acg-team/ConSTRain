@@ -1,3 +1,8 @@
+//! # Utils
+//! 
+//! Modules containing utility functions and structs for the ConSTRain library.
+//! This top-level module contains miscellaneous utility functions,
+//! the sub-modules contain functions related to specific functionality.
 pub mod cigar_utils;
 pub mod io_utils;
 
@@ -50,7 +55,7 @@ pub fn sample_name_from_path(filepath: &str) -> Result<String, Box<dyn Error>> {
 
 /// Number of partitions that exist for integers 0 - 50 (see [https://oeis.org/A000041](https://oeis.org/A000041)).
 /// For 0 - 1000, see here: [https://oeis.org/A000041/b000041.txt](https://oeis.org/A000041/b000041.txt)
-pub const N_PARTITIONS: &'static [usize] = &[
+pub const N_PARTITIONS: &[usize] = &[
     1, 1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627, 792,
     1002, 1255, 1575, 1958, 2436, 3010, 3718, 4565, 5604, 6842, 8349, 10143, 12310, 14883, 17977,
     21637, 26015, 31185, 37338, 44583, 53174, 63261, 75175, 89134, 105558, 124754, 147273, 173525,
