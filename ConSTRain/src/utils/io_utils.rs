@@ -1,7 +1,7 @@
 //! # IO Utils
-//! 
+//!
 //! Home of I/O functionality needed in the ConSTRain library. Provides
-//! functionality to serialize/deserialze tandem repeats from BED files, 
+//! functionality to serialize/deserialze tandem repeats from BED files,
 //! VCF files.
 use csv::ReaderBuilder;
 use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer};
@@ -147,7 +147,7 @@ fn make_vcf_header(
 
     for (target, length) in targets.iter().zip(lengths.iter()) {
         // let target_str = std::str::from_utf8(*target).expect("Error parsing contig name!");
-        let target_str = std::str::from_utf8(*target)?;
+        let target_str = std::str::from_utf8(target)?;
         let header_contig_line = format!(r#"##contig=<ID={},length={}>"#, target_str, length);
         header.push_record(header_contig_line.as_bytes());
     }
@@ -175,7 +175,7 @@ fn add_reference_info(
         .name2rid(tr_region.reference_info.seqname.as_bytes())?;
     let ref_len = tr_region.reference_info.get_reference_len() as usize;
     record.set_rid(Some(rid));
-    record.set_pos(tr_region.reference_info.start as i64);
+    record.set_pos(tr_region.reference_info.start);
 
     record.push_info_integer(b"END", &[tr_region.reference_info.end as i32])?;
     record.push_info_string(b"RU", &[tr_region.reference_info.unit.as_bytes()])?;
@@ -229,13 +229,16 @@ fn add_additional_info(
     tr_region: &TandemRepeat,
 ) -> Result<(), Box<dyn Error>> {
     record.push_format_integer(b"CN", &[tr_region.copy_number as i32])?;
-    let allele_freqs: Vec<String> = tr_region
-        .allele_freqs_as_tuples()
+
+    let mut allele_freqs = tr_region.allele_freqs_as_tuples();
+    allele_freqs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let allele_freqs: Vec<String> = allele_freqs
         .iter()
         .map(|i| format!("{},{}", i.0, i.1))
         .collect();
     let allele_freqs = allele_freqs.join("|");
     record.push_format_string(b"FREQS", &[allele_freqs.as_bytes()])?;
+
     let gt_as_allele_lens: Vec<String> = tr_region
         .gt_as_allele_lengths()
         .iter()

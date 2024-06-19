@@ -19,11 +19,11 @@ pub fn fetch_allele_lengths(
     htsfile: *mut htslib::htsFile,
     itr: *mut htslib::hts_itr_t,
     flank: usize,
-) {
+) -> Result<(), String> {
     let mut allele_lengths: HashMap<i64, f32> = HashMap::new();
     let mut record = Record::new();
     while let Some(result) = rhtslib_read(htsfile, itr, &mut record) {
-        if result.is_err() {
+        if result.is_err() {            
             eprintln!(
                 "Faulty read for region {}",
                 tr_region.reference_info.get_fetch_definition_s()
@@ -63,6 +63,8 @@ pub fn fetch_allele_lengths(
     if !allele_lengths.is_empty() {
         tr_region.set_allele_lengths(Some(allele_lengths));
     }
+
+    Ok(())
 }
 
 fn allele_length_from_cigar(
@@ -132,7 +134,7 @@ pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, 
         if *cn == 0 {
             continue;
         }
-        map.insert(*cn, partitions(*cn as usize));
+        map.insert(*cn, partitions(*cn));
     }
 
     map

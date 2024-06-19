@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "Sample name not specified. Using inferred sample name: {}",
                 name
             );
-            String::from(name)
+            name
         }
     };
 
@@ -83,17 +83,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     // in one of the threads.
     let mut copy_numbers: HashSet<usize> = HashSet::new();
     let mut tr_regions: Vec<TandemRepeat> = Vec::new();
-    io_utils::trs_from_bed(&cli.repeats, &cli.ploidy, &mut tr_regions, &mut copy_numbers)?;
+    io_utils::trs_from_bed(
+        &cli.repeats,
+        &cli.ploidy,
+        &mut tr_regions,
+        &mut copy_numbers,
+    )?;
     eprintln!("Read {} TR regions", tr_regions.len());
 
     let mut cnv_regions: Vec<CopyNumberVariant> = Vec::new();
-    match cli.cnvs {
-        Some(cnv_file) => {
-            io_utils::cnvs_from_bed(&cnv_file, &mut cnv_regions, &mut copy_numbers)?;
-            eprintln!("Read {} CNVs", cnv_regions.len());
-        }
-        None => (),
-    };
+    if let Some(cnv_file) = cli.cnvs {
+        io_utils::cnvs_from_bed(&cnv_file, &mut cnv_regions, &mut copy_numbers)?;
+        eprintln!("Read {} CNVs", cnv_regions.len());
+    }
 
     let copy_numbers: Vec<usize> = copy_numbers
         .iter()
@@ -138,14 +140,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         if idx.is_null() {
             panic!("Unable to load index for alignment file!");
         }
-
+        
         unsafe {
-            if htsfile
+            let is_cram = htsfile
                 .as_ref()
                 .expect("Problem accessing htsfile")
                 .is_cram()
-                != 0
-            {
+                != 0;
+            if is_cram {
                 match &cli.reference {
                     Some(reference) => rhtslib_set_reference(htsfile, reference),
                     None => {
@@ -156,20 +158,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         for tr_region in tr_regions {
-            if cnv_regions.len() > 0 {
+            if !cnv_regions.is_empty() {
                 tr_cn_from_cnvs(tr_region, &cnv_regions);
             }
 
             let fetch_request = tr_region.reference_info.get_fetch_definition_s();
             let itr = rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes());
 
-            fetch_allele_lengths(tr_region, htsfile, itr, cli.flanksize);
+            fetch_allele_lengths(tr_region, htsfile, itr, cli.flanksize); // add recoverable Err to handle here
 
             unsafe {
                 htslib::hts_itr_destroy(itr);
             }
 
-            estimate_genotype(tr_region, cli.reads_per_allele, Arc::clone(&partitions_map));
+            if let Err(e) =
+                estimate_genotype(tr_region, cli.reads_per_allele, Arc::clone(&partitions_map))
+            {
+                eprintln!("Could not estimate genotype for repeat {tr_region:?}: {e:?}")
+            }
         }
         unsafe {
             // htslib::sam_hdr_destroy(header);

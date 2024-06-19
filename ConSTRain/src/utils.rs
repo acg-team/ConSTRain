@@ -1,11 +1,11 @@
 //! # Utils
-//! 
+//!
 //! Modules containing utility functions and structs for the ConSTRain library.
 //! This top-level module contains miscellaneous utility functions,
 //! the sub-modules contain functions related to specific functionality.
 pub mod cigar_utils;
+use ndarray::prelude::*;
 pub mod io_utils;
-
 use std::{cmp, error::Error, path::Path};
 
 /// A structure to represent Copy Number Variants
@@ -46,11 +46,39 @@ pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 
 pub fn sample_name_from_path(filepath: &str) -> Result<String, Box<dyn Error>> {
     let name = Path::new(filepath)
         .file_stem()
-        .ok_or_else(|| "Could not infer sample name from path")?
+        .ok_or("Could not infer sample name from path")?
         .to_str()
-        .ok_or_else(|| "Could not infer sample name from path")?;
+        .ok_or("Could not infer sample name from path")?;
 
     Ok(String::from(name))
+}
+
+/// Zero pad array `a` to the given `min_len`.
+/// If `a` is already of `min_len` or longer, do nothing and return  `a`
+///
+/// # Examples
+/// ```
+/// use constrain::utils::zero_pad_if_shorter;
+/// use ndarray::prelude::*;
+///
+/// let left = arr1(&[13., 12., 11.]);
+/// let right = arr1(&[13., 12., 11.]);
+/// assert_eq!(left, zero_pad_if_shorter(right, 3));
+///
+/// let left = arr1(&[13., 12., 11., 0., 0.]);
+/// let right = arr1(&[13., 12., 11.]);
+/// assert_eq!(left, zero_pad_if_shorter(right, 5));
+/// ```
+pub fn zero_pad_if_shorter(
+    a: Array<f32, Dim<[usize; 1]>>,
+    min_len: usize,
+) -> Array<f32, Dim<[usize; 1]>> {
+    if a.len() >= min_len {
+        return a;
+    }
+    let mut padded_a = Array::<f32, _>::zeros(min_len);
+    padded_a.slice_mut(s![..a.len()]).assign(&a);
+    padded_a
 }
 
 /// Number of partitions that exist for integers 0 - 50 (see [https://oeis.org/A000041](https://oeis.org/A000041)).
@@ -61,3 +89,18 @@ pub const N_PARTITIONS: &[usize] = &[
     21637, 26015, 31185, 37338, 44583, 53174, 63261, 75175, 89134, 105558, 124754, 147273, 173525,
     204226,
 ];
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_padding() {
+        let left = arr1(&[13., 12., 11.]);
+        let right = arr1(&[13., 12., 11.]);
+        assert_eq!(left, zero_pad_if_shorter(right, 3));
+
+        let left = arr1(&[13., 12., 11., 0., 0.]);
+        let right = arr1(&[13., 12., 11.]);
+        assert_eq!(left, zero_pad_if_shorter(right, 5));
+    }
+}
