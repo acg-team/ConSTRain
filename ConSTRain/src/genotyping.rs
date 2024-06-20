@@ -10,13 +10,10 @@ pub fn estimate_genotype(
     min_reads_per_allele: usize,
     partitions_map: Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
 ) -> Result<()> {
-    // let n_mapped_reads = match tr_region.get_n_mapped_reads() {
-    //     Some(n) => n,
-    //     None => return Ok(()), // No reads were mapped to this locus, no need to estimate
-    // };
-
     // If no reads were mapped to this locus, there is no need to estimate
-    let Some(n_mapped_reads) = tr_region.get_n_mapped_reads() else {return Ok(())};
+    let Some(n_mapped_reads) = tr_region.get_n_mapped_reads() else {
+        return Ok(());
+    };
     if n_mapped_reads < min_reads_per_allele * tr_region.copy_number {
         // Not enough reads were mapped to this locus, refuse to estimate
         return Ok(());
@@ -129,7 +126,13 @@ fn most_likely_allele_distribution(
         .iter()
         .enumerate()
         // .filter_map(|(x, y)| if *y == min { Some(x) } else { None })
-        .filter_map(|(x, y)| if (*y - min) < f32::EPSILON { Some(x) } else { None })
+        .filter_map(|(x, y)| {
+            if (*y - min) < f32::EPSILON {
+                Some(x)
+            } else {
+                None
+            }
+        })
         .collect();
 
     match argmin.len().cmp(&1) {

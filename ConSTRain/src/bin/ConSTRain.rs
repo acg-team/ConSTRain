@@ -3,7 +3,10 @@ use clap::Parser;
 use constrain::repeat::TandemRepeat;
 use constrain::utils::CopyNumberVariant;
 use rayon::{prelude::*, ThreadPoolBuilder};
-use rust_htslib::{bam::{self, HeaderView}, htslib};
+use rust_htslib::{
+    bam::{self, HeaderView},
+    htslib,
+};
 use std::collections::HashSet;
 use std::{error::Error, ffi, path::Path, sync::Arc};
 
@@ -55,17 +58,15 @@ struct Cli {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let cli = Cli::parse();    
+    let cli = Cli::parse();
 
     let sample_name = if let Some(name) = cli.sample {
         name
     } else {
         let name = sample_name_from_path(&cli.alignment)?;
-        eprintln!(
-            "Sample name not specified. Using inferred sample name: {name}"
-        );
+        eprintln!("Sample name not specified. Using inferred sample name: {name}");
         name
-    };    
+    };
 
     // Currently, io_utils functions return all copy numbers they encounter
     // while reading data. This is then used to create partitions_map.
@@ -153,11 +154,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             let itr = rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes());
             if let Err(e) = fetch_allele_lengths(tr_region, htsfile, itr, cli.flanksize) {
                 eprintln!("Thread {tidx}: Error fetching reads for region {fetch_request}: {e:?}");
+                // destroy iterator and continue to the next repeat region
                 unsafe {
                     htslib::hts_itr_destroy(itr);
                 }
                 continue
             };
+            // destroy iterator
             unsafe {
                 htslib::hts_itr_destroy(itr);
             }
@@ -218,8 +221,10 @@ fn get_target_names_lengths(
 // alignment files, but those structs cause segfaults when reading CRAM files (not BAM, interestingly)
 // when they were dropped, even on trivial tests. -> submit issue on GitHub?
 fn rhtslib_from_path<P: AsRef<Path>>(path: P) -> *mut htslib::htsFile {
-    let htsfile: *mut htslib::htsFile =
-        rhtslib_hts_open(&rust_htslib::utils::path_as_bytes(path, true).unwrap(), b"r");
+    let htsfile: *mut htslib::htsFile = rhtslib_hts_open(
+        &rust_htslib::utils::path_as_bytes(path, true).unwrap(),
+        b"r",
+    );
     htsfile
 }
 
