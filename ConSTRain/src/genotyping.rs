@@ -1,18 +1,22 @@
 use crate::repeat::TandemRepeat;
 use crate::utils::{self, N_PARTITIONS};
 
+use anyhow::{bail, Context, Result};
 use ndarray::prelude::*;
-use std::{cmp::Ordering, collections::HashMap, error::Error, sync::Arc};
+use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
 pub fn estimate_genotype(
     tr_region: &mut TandemRepeat,
     min_reads_per_allele: usize,
     partitions_map: Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
-) -> Result<(), Box<dyn Error>> {
-    let n_mapped_reads = match tr_region.get_n_mapped_reads() {
-        Some(n) => n,
-        None => return Ok(()), // No reads were mapped to this locus, no need to estimate
-    };
+) -> Result<()> {
+    // let n_mapped_reads = match tr_region.get_n_mapped_reads() {
+    //     Some(n) => n,
+    //     None => return Ok(()), // No reads were mapped to this locus, no need to estimate
+    // };
+
+    // If no reads were mapped to this locus, there is no need to estimate
+    let Some(n_mapped_reads) = tr_region.get_n_mapped_reads() else {return Ok(())};
     if n_mapped_reads < min_reads_per_allele * tr_region.copy_number {
         // Not enough reads were mapped to this locus, refuse to estimate
         return Ok(());
@@ -24,13 +28,18 @@ pub fn estimate_genotype(
     match counts.len().cmp(&tr_region.copy_number) {
         Ordering::Less => counts = utils::zero_pad_if_shorter(counts, tr_region.copy_number),
         Ordering::Equal => (),
-        Ordering::Greater => counts = counts.slice_move(s![..tr_region.copy_number]),
+        Ordering::Greater => counts = counts.slice_move(s![..tr_region.copy_number]), // and maybe set error_constant?
     };
 
-    let partitions = match partitions_map.get(&tr_region.copy_number) {
-        Some(comp) => comp,
-        None => return Ok(()),
-    };
+    let partitions = partitions_map
+        .get(&tr_region.copy_number)
+        .with_context(|| {
+            format!(
+                "Repeat {} has copy number {}, for which partitions exist",
+                tr_region.reference_info.get_fetch_definition_s(),
+                tr_region.copy_number
+            )
+        })?;
 
     // at least `threshold_val` number of reads must support a give allele length for it to be considered
     let threshold_val = n_mapped_reads as f32 / tr_region.copy_number as f32 * 0.5;
@@ -75,7 +84,7 @@ fn find_valid_partition_idxs(
     // First, find how many alleles are observed that are supported by
     // enough reads (i.e., have more reads than `threshold_value`)
     let mut threshold_idx = 0;
-    for count in counts.iter() {
+    for count in counts {
         if *count > threshold_value {
             threshold_idx += 1;
         } else {
@@ -107,26 +116,28 @@ fn most_likely_allele_distribution(
     n_mapped_reads: usize,
     copy_number: usize,
     counts: &Array<f32, Dim<[usize; 1]>>,
-) -> Result<usize, String> {
+) -> Result<usize> {
     let mut errors = partitions.mapv(|a| a * (n_mapped_reads / copy_number) as f32);
     errors = errors - counts.slice(s![..copy_number]);
     errors.mapv_inplace(|x| x.powi(2));
 
     let error_sums = errors.sum_axis(Axis(1));
-    let min = *error_sums.iter().min_by(|a, b| a.total_cmp(b)).unwrap(); // we can unwrap here since we check earlier if there are enough reads to estimate genotype
+    // we can unwrap here: `min_by()` returns None if iterator is empty and we check earlier that it's not
+    let min = *error_sums.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
 
     let argmin: Vec<usize> = error_sums
         .iter()
         .enumerate()
-        .filter_map(|(x, y)| if *y == min { Some(x) } else { None })
+        // .filter_map(|(x, y)| if *y == min { Some(x) } else { None })
+        .filter_map(|(x, y)| if (*y - min) < f32::EPSILON { Some(x) } else { None })
         .collect();
 
     match argmin.len().cmp(&1) {
-        Ordering::Less => Err(String::from("This should not happen")),
+        Ordering::Less => {
+            bail!("No most likely allele distribution was found. This should not happen")
+        }
         Ordering::Equal => Ok(argmin[0]),
-        Ordering::Greater => Err(String::from(
-            "Multiple allele distributions are equally likely",
-        )),
+        Ordering::Greater => bail!("Multiple allele distributions are equally likely"),
     }
 }
 
@@ -148,10 +159,10 @@ pub fn partitions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
         while x <= y {
             a[k] = x;
             y -= x;
-            k += 1
+            k += 1;
         }
         a[k] = x + y;
-        for (i, val) in a[..k + 1].iter().rev().enumerate() {
+        for (i, val) in a[..=k].iter().rev().enumerate() {
             results[[results_idx, i]] = *val as f32;
         }
 
@@ -244,12 +255,8 @@ mod tests {
         let cn = 3;
         let counts = arr1(&[20., 10., 0.]);
 
-        assert_eq!(
-            Err(String::from(
-                "Multiple allele distributions are equally likely"
-            )),
-            most_likely_allele_distribution(&partitions, n_reads, cn, &counts)
-        );
+        let res = most_likely_allele_distribution(&partitions, n_reads, cn, &counts);
+        assert!(res.is_err());
     }
 
     #[test]

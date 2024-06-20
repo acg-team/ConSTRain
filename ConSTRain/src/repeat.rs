@@ -1,9 +1,9 @@
 //! # Repeat
 //!
 //! Module containing structs to represent tandem repeats.
-//! [TandemRepeat] is the struct that represents an observation of a tandem
+//! [`TandemRepeat`] is the struct that represents an observation of a tandem
 //! repeat in an alignment, included observed allele lengths across reads and the
-//! copy number in a specific sample. It is also associated with a [RepeatReferenceInfo] struct,
+//! copy number in a specific sample. It is also associated with a [`RepeatReferenceInfo`] struct,
 //! which encodes how a repetetive region looks in the reference genome.
 //! `ConSTRain` assumes that TRs are perfect tandem repetitions of a given nucleotide motif.
 use ndarray::prelude::*;
@@ -30,7 +30,7 @@ impl TandemRepeat {
         self.allele_lengths = new_allele_lengths
     }
     pub fn set_cn(&mut self, new_cn: usize) {
-        self.copy_number = new_cn
+        self.copy_number = new_cn;
     }
     pub fn allele_freqs_as_tuples(&self) -> Vec<(i64, f32)> {
         match &self.allele_lengths {
@@ -46,11 +46,11 @@ impl TandemRepeat {
 
         if let Some(by) = sort_by {
             if by == "freq" {
-                count_vec.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap())
+                count_vec.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             } else if by == "len" {
-                count_vec.sort_unstable_by(|a, b| a.0.cmp(&b.0))
+                count_vec.sort_unstable_by(|a, b| a.0.cmp(&b.0));
             } else {
-                eprintln!("If provided, sort_by must be 'freq' or 'len'. Skipping sort")
+                eprintln!("If provided, sort_by must be 'freq' or 'len'. Skipping sort");
             }
         }
 
@@ -65,7 +65,7 @@ impl TandemRepeat {
                 let mut allele_lens: Vec<i64> = Vec::new();
                 for allele in genotype {
                     for _ in 0..allele.1 as usize {
-                        allele_lens.push(allele.0)
+                        allele_lens.push(allele.0);
                     }
                 }
                 allele_lens
@@ -80,7 +80,7 @@ impl TandemRepeat {
     }
 }
 
-/// `RepeatReferenceInfo` stores information encoding how a [TandemRepeat] is represented
+/// `RepeatReferenceInfo` stores information encoding how a [`TandemRepeat`] is represented
 /// in the reference genome. The `start` and `end` are encoded in the BED coordinate system:
 /// 0-based, half-open. `unit` represents the repeating nucleotide motif, and `period` the length
 /// of `unit` (convenient to store separately so we don't need to do `unit.len()` all the time).
@@ -102,12 +102,12 @@ impl RepeatReferenceInfo {
         format!("{}:{}-{}", self.seqname, self.start, self.end)
     }
     pub fn get_reference_len(&self) -> i64 {
-        if (self.end - self.start) % self.period != 0 {
-            panic!(
-                "Start and end positions for repeat '{}' are not compatible with the period!",
-                self.get_fetch_definition_s()
-            );
-        }
+        assert!(
+            (self.end - self.start) % self.period == 0,
+            "Start and end positions for repeat '{}' are not compatible with the period!",
+            self.get_fetch_definition_s()
+        );
+
         (self.end - self.start) / self.period
     }
 }

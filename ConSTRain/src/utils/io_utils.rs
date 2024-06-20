@@ -1,14 +1,13 @@
 //! # IO Utils
 //!
-//! Home of I/O functionality needed in the ConSTRain library. Provides
+//! Home of I/O functionality needed in the `ConSTRain` library. Provides
 //! functionality to serialize/deserialze tandem repeats from BED files,
 //! VCF files.
+use anyhow::{Context, Result};
 use csv::ReaderBuilder;
 use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer};
 use serde_json::Value;
-use std::io;
-use std::str::Utf8Error;
-use std::{collections::HashSet, error::Error, fs::File, io::BufReader};
+use std::{collections::HashSet, fs::File, io::BufReader};
 
 use crate::repeat::{RepeatReferenceInfo, TandemRepeat};
 use crate::utils::CopyNumberVariant;
@@ -22,23 +21,25 @@ pub fn trs_from_bed(
     bed_path: &str,
     ploidy_path: &str,
     tr_buffer: &mut Vec<TandemRepeat>,
-    cn_buffer: &mut HashSet<usize>,
-) -> Result<(), Box<dyn Error>> {
+    observed_cn_buffer: &mut HashSet<usize>,
+) -> Result<()> {
     let ploidy = ploidy_from_json(ploidy_path)?;
 
     let mut bed_reader = ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
-        .from_path(bed_path)?;
+        .from_path(bed_path)
+        .with_context(|| format!("Could not read bed file {bed_path}"))?;
 
     for result in bed_reader.deserialize() {
-        let ref_info: RepeatReferenceInfo = result?;
+        let ref_info: RepeatReferenceInfo =
+            result.with_context(|| format!("Failed to deserialize bed record in {bed_path}"))?;
 
         // Get base copy number of contig from ploidy json.
         // If the contig does not exist in the json, default to CN 0 (which means TRs on this contig won't be genotyped)
         let cn = ploidy[&ref_info.seqname].as_u64().unwrap_or(0) as usize;
         if cn == 0 {
-            eprintln!("WARNING: contig for TR '{}' was not found in the ploidy json file. Setting CN to 0", ref_info.get_fetch_definition_s())
+            eprintln!("WARNING: contig for TR '{}' was not found in the ploidy json file. Setting CN to 0", ref_info.get_fetch_definition_s());
         }
 
         let tr_region = TandemRepeat {
@@ -47,7 +48,7 @@ pub fn trs_from_bed(
             allele_lengths: None,
             genotype: None,
         };
-        cn_buffer.insert(cn);
+        observed_cn_buffer.insert(cn);
         tr_buffer.push(tr_region);
     }
 
@@ -63,10 +64,12 @@ pub fn trs_from_bed(
 ///     "chrY": 0
 /// }
 /// ```
-fn ploidy_from_json(path: &str) -> Result<Value, io::Error> {
-    let file = File::open(path)?;
+fn ploidy_from_json(path: &str) -> Result<Value> {
+    let file = File::open(path).with_context(|| format!("Could not read json {path}"))?;
     let reader = BufReader::new(file);
-    Ok(serde_json::from_reader(reader)?)
+    let result = serde_json::from_reader(reader)
+        .with_context(|| format!("Could not deserialize json {path}"))?;
+    Ok(result)
 }
 
 /// Read copy number variants specified in the bed file at `cnv_path` into `cnv_buffer`.
@@ -75,16 +78,18 @@ fn ploidy_from_json(path: &str) -> Result<Value, io::Error> {
 pub fn cnvs_from_bed(
     cnv_path: &str,
     cnv_buffer: &mut Vec<CopyNumberVariant>,
-    cn_buffer: &mut HashSet<usize>,
-) -> Result<(), Box<dyn Error>> {
+    observed_cn_buffer: &mut HashSet<usize>,
+) -> Result<()> {
     let mut bed_reader = ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
-        .from_path(cnv_path)?;
+        .from_path(cnv_path)
+        .with_context(|| format!("Could not read bed file {cnv_path}"))?;
 
     for result in bed_reader.deserialize() {
-        let cnv: CopyNumberVariant = result?;
-        cn_buffer.insert(cnv.cn);
+        let cnv: CopyNumberVariant =
+            result.with_context(|| format!("Failed to deserialize bed record in {cnv_path}"))?;
+        observed_cn_buffer.insert(cnv.cn);
         cnv_buffer.push(cnv);
     }
 
@@ -94,12 +99,12 @@ pub fn cnvs_from_bed(
 /// Write (genotyped) tandem repeat regions to a vcf file.
 pub fn trs_to_vcf(
     tr_regions: &[TandemRepeat],
-    targets: &[&[u8]],
+    targets: &[String],
     lengths: &[u64],
     sample_name: &str,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<()> {
     // Create header, write uncompressed VCF to stdout (header gets written when Writer is constructed)
-    let header = make_vcf_header(targets, lengths, sample_name)?;
+    let header = make_vcf_header(targets, lengths, sample_name);
     let mut vcf = Writer::from_stdout(&header, true, Format::Vcf)?;
 
     for tr_region in tr_regions {
@@ -114,13 +119,13 @@ pub fn trs_to_vcf(
         add_additional_info(&mut record, tr_region)?;
 
         // Write record
-        vcf.write(&record)?
+        vcf.write(&record)?;
     }
 
     Ok(())
 }
 
-/// The VCF info lines to be included in the header. See [make_vcf_header].
+/// The VCF info lines to be included in the header. See [`make_vcf_header`].
 const VCF_INFO_LINES: &[&[u8]] = &[
     br#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of reference allele">"#,
     br#"##INFO=<ID=RU,Number=1,Type=String,Description="Repeat motif">"#,
@@ -128,7 +133,7 @@ const VCF_INFO_LINES: &[&[u8]] = &[
     br#"##INFO=<ID=REF,Number=1,Type=Float,Description="Repeat allele length in reference">"#,
 ];
 
-/// The VCF format lines to be included in the header. See [make_vcf_header].
+/// The VCF format lines to be included in the header. See [`make_vcf_header`].
 const VCF_FORMAT_LINES: &[&[u8]] = &[
     br#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#,
     br#"##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Copy number">"#,
@@ -136,67 +141,72 @@ const VCF_FORMAT_LINES: &[&[u8]] = &[
     br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in number of copies of the repeat motif">"#,
 ];
 
-/// Construct VCF a header. First, include information about the target contigs, followed by the [VCF_INFO_LINES] and [VCF_FORMAT_LINES].
+/// Construct VCF a header. First, include information about the target contigs, followed by the [`VCF_INFO_LINES`] and [`VCF_FORMAT_LINES`].
 /// Then, write TR variant calls to stdout.
-fn make_vcf_header(
-    targets: &[&[u8]],
-    lengths: &[u64],
-    sample_name: &str,
-) -> Result<Header, Utf8Error> {
+fn make_vcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> Header {
     let mut header = Header::new();
 
     for (target, length) in targets.iter().zip(lengths.iter()) {
-        // let target_str = std::str::from_utf8(*target).expect("Error parsing contig name!");
-        let target_str = std::str::from_utf8(target)?;
-        let header_contig_line = format!(r#"##contig=<ID={},length={}>"#, target_str, length);
+        let header_contig_line = format!(r#"##contig=<ID={target},length={length}>"#);
         header.push_record(header_contig_line.as_bytes());
     }
 
-    for header_info_line in VCF_INFO_LINES.iter() {
+    for header_info_line in VCF_INFO_LINES {
         header.push_record(header_info_line);
     }
-    for header_format_line in VCF_FORMAT_LINES.iter() {
+    for header_format_line in VCF_FORMAT_LINES {
         header.push_record(header_format_line);
     }
     header.push_sample(sample_name.as_bytes());
 
-    Ok(header)
+    header
 }
 
 /// Add information about how the `tr_region` looks in the reference genome to the
 /// VCF `record`. We need the `vcf` struct to get the contig id from the VCF header.
-fn add_reference_info(
-    record: &mut Record,
-    vcf: &Writer,
-    tr_region: &TandemRepeat,
-) -> Result<(), Box<dyn Error>> {
+fn add_reference_info(record: &mut Record, vcf: &Writer, tr_region: &TandemRepeat) -> Result<()> {
+    let context = || {
+        format!(
+            "Error setting reference info for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    };
+
     let rid = vcf
         .header()
-        .name2rid(tr_region.reference_info.seqname.as_bytes())?;
+        .name2rid(tr_region.reference_info.seqname.as_bytes())
+        .with_context(context)?;
     let ref_len = tr_region.reference_info.get_reference_len() as usize;
     record.set_rid(Some(rid));
     record.set_pos(tr_region.reference_info.start);
 
-    record.push_info_integer(b"END", &[tr_region.reference_info.end as i32])?;
-    record.push_info_string(b"RU", &[tr_region.reference_info.unit.as_bytes()])?;
-    record.push_info_integer(b"PERIOD", &[tr_region.reference_info.period as i32])?;
-    record.push_info_integer(b"REF", &[ref_len as i32])?;
+    record
+        .push_info_integer(b"END", &[tr_region.reference_info.end as i32])
+        .with_context(context)?;
+    record
+        .push_info_string(b"RU", &[tr_region.reference_info.unit.as_bytes()])
+        .with_context(context)?;
+    record
+        .push_info_integer(b"PERIOD", &[tr_region.reference_info.period as i32])
+        .with_context(context)?;
+    record
+        .push_info_integer(b"REF", &[ref_len as i32])
+        .with_context(context)?;
 
     Ok(())
 }
 
 /// Add genotyping results stored on `tr_region` to the VCF `record`.
-fn add_alleles_genotypes(
-    record: &mut Record,
-    tr_region: &TandemRepeat,
-) -> Result<(), Box<dyn Error>> {
+fn add_alleles_genotypes(record: &mut Record, tr_region: &TandemRepeat) -> Result<()> {
     let ref_len = tr_region.reference_info.get_reference_len() as usize;
     let ref_allele = tr_region.reference_info.unit.repeat(ref_len);
     let mut alleles = vec![ref_allele];
     let mut genotype: Vec<GenotypeAllele> = Vec::new();
+
     match &tr_region.genotype {
         None => genotype.push(GenotypeAllele::UnphasedMissing), // No genotype estimated for repeat
         Some(gts) => {
+            // gt has form &(allele_length: i64, n_times_estimated: f32)
             for gt in gts {
                 let len = gt.0 as i32;
                 let n_estimated = gt.1 as i32;
@@ -217,18 +227,34 @@ fn add_alleles_genotypes(
             }
         }
     }
-    let alleles = Vec::from_iter(alleles.iter().map(|i| i.as_bytes()));
-    record.set_alleles(&alleles)?;
-    record.push_genotypes(&genotype)?;
+
+    let alleles: Vec<&[u8]> = alleles.iter().map(std::string::String::as_bytes).collect();
+    record.set_alleles(&alleles).with_context(|| {
+        format!(
+            "Error setting alleles for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    })?;
+    record.push_genotypes(&genotype).with_context(|| {
+        format!(
+            "Error setting genotype for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    })?;
     Ok(())
 }
 
 /// Add additional information stored on `tr_region` to the VCF `record`
-fn add_additional_info(
-    record: &mut Record,
-    tr_region: &TandemRepeat,
-) -> Result<(), Box<dyn Error>> {
-    record.push_format_integer(b"CN", &[tr_region.copy_number as i32])?;
+fn add_additional_info(record: &mut Record, tr_region: &TandemRepeat) -> Result<()> {
+    let context = || {
+        format!(
+            "Error setting format values for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    };
+    record
+        .push_format_integer(b"CN", &[tr_region.copy_number as i32])
+        .with_context(context)?;
 
     let mut allele_freqs = tr_region.allele_freqs_as_tuples();
     allele_freqs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -237,15 +263,19 @@ fn add_additional_info(
         .map(|i| format!("{},{}", i.0, i.1))
         .collect();
     let allele_freqs = allele_freqs.join("|");
-    record.push_format_string(b"FREQS", &[allele_freqs.as_bytes()])?;
+    record
+        .push_format_string(b"FREQS", &[allele_freqs.as_bytes()])
+        .with_context(context)?;
 
     let gt_as_allele_lens: Vec<String> = tr_region
         .gt_as_allele_lengths()
         .iter()
-        .map(|i| i.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
     let gt_as_allele_lens = gt_as_allele_lens.join(",");
-    record.push_format_string(b"REPCN", &[gt_as_allele_lens.as_bytes()])?;
+    record
+        .push_format_string(b"REPCN", &[gt_as_allele_lens.as_bytes()])
+        .with_context(context)?;
 
     Ok(())
 }

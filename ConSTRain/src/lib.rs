@@ -2,9 +2,11 @@ pub mod genotyping;
 pub mod repeat;
 pub mod utils;
 
-use crate::repeat::TandemRepeat;
-use crate::utils::{cigar_utils, CopyNumberVariant};
-
+use crate::{
+    repeat::TandemRepeat,
+    utils::{cigar_utils, CopyNumberVariant},
+};
+use anyhow::{Context, Result};
 use genotyping::partitions;
 use ndarray::{Array, Dim};
 use rust_htslib::{
@@ -19,17 +21,24 @@ pub fn fetch_allele_lengths(
     htsfile: *mut htslib::htsFile,
     itr: *mut htslib::hts_itr_t,
     flank: usize,
-) -> Result<(), String> {
+) -> Result<()> {
     let mut allele_lengths: HashMap<i64, f32> = HashMap::new();
     let mut record = Record::new();
     while let Some(result) = rhtslib_read(htsfile, itr, &mut record) {
-        if result.is_err() {            
-            eprintln!(
-                "Faulty read for region {}",
+        // Should we return an Error here or just continue to the next iteration?
+        result.with_context(|| {
+            format!(
+                "Encountered faulty read for {}",
                 tr_region.reference_info.get_fetch_definition_s()
-            );
-            continue;
-        }
+            )
+        })?;
+        // if result.is_err() {
+        //     // eprintln!(
+        //     //     "Faulty read for region {}",
+        //     //     tr_region.reference_info.get_fetch_definition_s()
+        //     // );
+        //     // continue;
+        // }
 
         if record.is_duplicate() || record.is_supplementary() || record.is_quality_check_failed() {
             // Ignore duplicate, supplementary, low quality reads
@@ -42,19 +51,19 @@ pub fn fetch_allele_lengths(
             continue;
         }
 
-        let starting_pos = record.pos();
+        let starting_pos = record.pos(); // 0-based
         let tr_region_len = allele_length_from_cigar(
             &record.cigar(),
             starting_pos,
             tr_region.reference_info.start,
             tr_region.reference_info.end,
-        );
+        )?;
         if tr_region_len % tr_region.reference_info.period != 0 {
             // TR length is not a multiple of period: skip
             continue;
         }
         let tr_len = tr_region_len / tr_region.reference_info.period;
-        // TODO: Should try to do this directly on the TandemRepeat struct
+        // TODO: Could try to do this directly on the TandemRepeat struct
         allele_lengths
             .entry(tr_len)
             .and_modify(|counter| *counter += 1.0)
@@ -72,12 +81,13 @@ fn allele_length_from_cigar(
     mut current_pos: i64,
     tr_start: i64,
     tr_end: i64,
-) -> i64 {
+) -> Result<i64> {
     let mut tr_region_len = 0;
     for op in cigar {
         let consumes_r = cigar_utils::cigar_consumes_ref(op);
         let advances_tr = cigar_utils::cigar_advances_tr_len(op);
-        let len = op.len() as i64;
+        // let len = op.len() as i64;
+        let len = i64::from(op.len());
 
         if consumes_r && !advances_tr {
             current_pos += len;
@@ -90,7 +100,7 @@ fn allele_length_from_cigar(
         } else if consumes_r && advances_tr {
             // BAM and BED coordinate systems are half-open, utils::range_overlap assumes closed => decrement end positions
             tr_region_len +=
-                utils::range_overlap(current_pos, current_pos + len - 1, tr_start, tr_end - 1);
+                utils::range_overlap(current_pos, current_pos + len - 1, tr_start, tr_end - 1)?;
             current_pos += len;
         }
 
@@ -99,13 +109,17 @@ fn allele_length_from_cigar(
         }
     }
 
-    tr_region_len
+    Ok(tr_region_len)
 }
 
-pub fn tr_cn_from_cnvs(tr_region: &mut TandemRepeat, cnv_regions: &[CopyNumberVariant]) {
+pub fn tr_cn_from_cnvs(
+    tr_region: &mut TandemRepeat,
+    cnv_regions: &[CopyNumberVariant],
+) -> Result<()> {
     // Currently extremely basic one vs all comparison strategy
     // Check how GenomicRanges R library (or bedtools?) finds range
     // overlaps between two lists of entities
+    let region_len = tr_region.reference_info.end - tr_region.reference_info.start;
     for cnv in cnv_regions {
         if tr_region.reference_info.seqname != cnv.seqname {
             continue;
@@ -115,17 +129,21 @@ pub fn tr_cn_from_cnvs(tr_region: &mut TandemRepeat, cnv_regions: &[CopyNumberVa
             tr_region.reference_info.end - 1,
             cnv.start,
             cnv.end - 1,
-        );
-        if overlap == tr_region.reference_info.end - tr_region.reference_info.start {
+        )?;
+
+        if overlap == region_len {
             tr_region.set_cn(cnv.cn);
-            return;
+            // TRs can intersect with at most one CNV, we found a hit so we can return
+            return Ok(());
         } else if overlap > 0 {
             // TR partially overlaps CNV, impossible to set sensible CN for TR. Set to 0 so it gets skipped
-            // Not strictly correct, maybe add this concept explicitly to TandemRepeat
+            // Should we return an Err here instead?
             tr_region.set_cn(0);
-            return;
+            // TRs can intersect with at most one CNV, we found a hit so we can return
+            return Ok(());
         }
     }
+    Ok(())
 }
 
 pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
@@ -150,7 +168,7 @@ mod tests {
     fn tr_length_from_cigar_match() {
         let cigar_start = 20;
         let cigar = CigarString(vec![Cigar::Match(100)]).into_view(cigar_start);
-        let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50);
+        let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50).unwrap();
 
         assert_eq!(10, tr_region_len);
     }
@@ -159,7 +177,7 @@ mod tests {
         let cigar_start = 20;
         let cigar = CigarString(vec![Cigar::Match(20), Cigar::Ins(6), Cigar::Match(54)])
             .into_view(cigar_start);
-        let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50);
+        let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50).unwrap();
 
         assert_eq!(16, tr_region_len);
     }
@@ -168,7 +186,7 @@ mod tests {
         let cigar_start = 20;
         let cigar = CigarString(vec![Cigar::Match(20), Cigar::Del(5), Cigar::Match(54)])
             .into_view(cigar_start);
-        let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50);
+        let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50).unwrap();
 
         assert_eq!(5, tr_region_len);
     }

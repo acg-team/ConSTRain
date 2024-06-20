@@ -24,7 +24,7 @@ pub fn cigar_consumes_query(cigar: &Cigar) -> bool {
 
 /// Used when in a TR region to see if the provided cigar operation
 /// `cigar` advances the TR length.
-/// (same as [cigar_consumes_query] but excluding the [Cigar::SoftClip] variant)
+/// (same as [`cigar_consumes_query`] but excluding the [`Cigar::SoftClip`] variant)
 pub fn cigar_advances_tr_len(cigar: &Cigar) -> bool {
     matches!(
         cigar,

@@ -1,12 +1,14 @@
 //! # Utils
 //!
-//! Modules containing utility functions and structs for the ConSTRain library.
+//! Modules containing utility functions and structs for the `ConSTRain` library.
 //! This top-level module contains miscellaneous utility functions,
 //! the sub-modules contain functions related to specific functionality.
-pub mod cigar_utils;
+use anyhow::{bail, Context, Result};
 use ndarray::prelude::*;
+use std::{cmp, path::Path};
+
+pub mod cigar_utils;
 pub mod io_utils;
-use std::{cmp, error::Error, path::Path};
 
 /// A structure to represent Copy Number Variants
 #[derive(Debug, serde::Deserialize)]
@@ -20,17 +22,24 @@ pub struct CopyNumberVariant {
 
 /// Determine the overlap between two ranges, each specified by their start
 /// and end coordinates.
+/// **NOTE:** start and end positions are inclusive
 ///
 /// # Examples
 ///
 /// ```
 /// let a: Vec<i64> = vec![10, 15];
 /// let b: Vec<i64> = vec![13, 25];
-/// let overlap = constrain::utils::range_overlap(a[0], a[1], b[0], b[1]);
+/// let overlap = constrain::utils::range_overlap(a[0], a[1], b[0], b[1]).unwrap();
 /// assert_eq!(3, overlap);
 /// ```
-pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 {
-    cmp::max(0, cmp::min(a_end, b_end) - cmp::max(a_start, b_start) + 1)
+pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> Result<i64> {
+    if (a_start >= a_end) | (b_start >= b_end) {
+        bail!("a or b range not correctly specified")
+    }
+    Ok(cmp::max(
+        0,
+        cmp::min(a_end, b_end) - cmp::max(a_start, b_start) + 1,
+    ))
 }
 
 /// Infer a sample name from the filepath of an alignment file
@@ -43,12 +52,13 @@ pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 
 ///
 /// assert_eq!("alignment", sample_name);
 /// ```
-pub fn sample_name_from_path(filepath: &str) -> Result<String, Box<dyn Error>> {
+pub fn sample_name_from_path(filepath: &str) -> Result<String> {
+    let context = || format!("Could not infer sample name from path {filepath}");
     let name = Path::new(filepath)
         .file_stem()
-        .ok_or("Could not infer sample name from path")?
+        .with_context(context)?
         .to_str()
-        .ok_or("Could not infer sample name from path")?;
+        .with_context(context)?;
 
     Ok(String::from(name))
 }
@@ -73,12 +83,14 @@ pub fn zero_pad_if_shorter(
     a: Array<f32, Dim<[usize; 1]>>,
     min_len: usize,
 ) -> Array<f32, Dim<[usize; 1]>> {
-    if a.len() >= min_len {
-        return a;
+    match a.len().cmp(&min_len) {
+        cmp::Ordering::Less => {
+            let mut padded_a = Array::<f32, _>::zeros(min_len);
+            padded_a.slice_mut(s![..a.len()]).assign(&a);
+            padded_a
+        }
+        cmp::Ordering::Equal | cmp::Ordering::Greater => a,
     }
-    let mut padded_a = Array::<f32, _>::zeros(min_len);
-    padded_a.slice_mut(s![..a.len()]).assign(&a);
-    padded_a
 }
 
 /// Number of partitions that exist for integers 0 - 50 (see [https://oeis.org/A000041](https://oeis.org/A000041)).
@@ -86,10 +98,11 @@ pub fn zero_pad_if_shorter(
 pub const N_PARTITIONS: &[usize] = &[
     1, 1, 2, 3, 5, 7, 11, 15, 22, 30, 42, 56, 77, 101, 135, 176, 231, 297, 385, 490, 627, 792,
     1002, 1255, 1575, 1958, 2436, 3010, 3718, 4565, 5604, 6842, 8349, 10143, 12310, 14883, 17977,
-    21637, 26015, 31185, 37338, 44583, 53174, 63261, 75175, 89134, 105558, 124754, 147273, 173525,
-    204226,
+    21637, 26015, 31185, 37338, 44583, 53174, 63261, 75175, 89134, 105_558, 124_754, 147_273, 173_525,
+    204_226,
 ];
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
