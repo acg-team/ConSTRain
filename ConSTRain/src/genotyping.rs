@@ -10,6 +10,10 @@ pub fn estimate_genotype(
     min_reads_per_allele: usize,
     partitions_map: Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
 ) -> Result<()> {
+    // Copy number for locus is 0, there is no need to estimate
+    if tr_region.copy_number == 0 {
+        return Ok(());
+    }
     // If no reads were mapped to this locus, there is no need to estimate
     let Some(n_mapped_reads) = tr_region.get_n_mapped_reads() else {
         return Ok(());
@@ -32,7 +36,7 @@ pub fn estimate_genotype(
         .get(&tr_region.copy_number)
         .with_context(|| {
             format!(
-                "Repeat {} has copy number {}, for which partitions exist",
+                "Repeat {} has copy number {}, for which no partitions exist",
                 tr_region.reference_info.get_fetch_definition_s(),
                 tr_region.copy_number
             )

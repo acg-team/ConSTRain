@@ -1,22 +1,124 @@
 pub mod genotyping;
 pub mod repeat;
+pub mod rhtslib_reimplement;
 pub mod utils;
 
 use crate::{
     repeat::TandemRepeat,
     utils::{cigar_utils, CopyNumberVariant},
 };
+
 use anyhow::{Context, Result};
 use genotyping::partitions;
 use ndarray::{Array, Dim};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
-    errors::Error as htsError,
-    htslib,
+    htslib::{self, htsFile},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi, sync::Arc};
 
-pub fn fetch_allele_lengths(
+/// The main work of ConSTRain happens in this `run` function.
+/// It is meant to be called from inside a rayon parallel iterator.
+/// For each thread, we instantiate a separate `htsfile`, `header`, and `idx`.
+/// If anything goes wrong in this process we panic, since these are absolutely essential.
+/// After the setup, we iterate over tandem repeat regions, create an iterator for each region,
+/// fetch allele lengths from the mapped reads, and estimate the underlying genotype from the
+/// alle length distribution. If something goes wrong here, we just log the error and continue
+/// to the next tandem repeat region.
+pub fn run(
+    tr_regions: &mut [TandemRepeat],
+    cnv_regions: &[CopyNumberVariant],
+    partitions_map: &Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
+    alignment: &str,
+    reference: Option<&String>,
+    flanksize: usize,
+    reads_per_allele: usize,
+    tidx: usize,
+) {
+    eprintln!("Launching thread {tidx}");
+
+    let (htsfile, idx, header) =
+        thread_setup(alignment, reference).expect("Error during thread setup");
+
+    for tr_region in tr_regions {
+        let fetch_request = tr_region.reference_info.get_fetch_definition_s();
+        if !cnv_regions.is_empty() {
+            if let Err(e) = tr_cn_from_cnvs(tr_region, &cnv_regions) {
+                eprintln!("Thread {tidx}: Error setting copy number, skipping locus {fetch_request}: {e:?}");
+                continue;
+            };
+        }
+
+        let Ok(itr) =
+            rhtslib_reimplement::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
+        else {
+            eprintln!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
+            continue;
+        };
+
+        if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
+            eprintln!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
+            // destroy iterator and continue to the next repeat region
+            unsafe {
+                htslib::hts_itr_destroy(itr);
+            }
+            continue;
+        };
+        // destroy iterator
+        unsafe {
+            htslib::hts_itr_destroy(itr);
+        }
+
+        if let Err(e) =
+            // Should we do Arc::clone for each tr_region or could we do it once per thread instead?
+            genotyping::estimate_genotype(
+                tr_region,
+                reads_per_allele,
+                Arc::clone(&partitions_map),
+            )
+        {
+            eprintln!(
+                "Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}"
+            );
+            continue;
+        }
+    }
+    unsafe {
+        htslib::hts_close(htsfile);
+    }
+
+    eprintln!("Finished on thread {tidx}");
+}
+
+fn thread_setup(
+    alignment_path: &str,
+    reference: Option<&String>,
+) -> Result<(*mut htsFile, *mut htslib::hts_idx_t, *mut htslib::sam_hdr_t)> {
+    let htsfile = rhtslib_reimplement::rhtslib_from_path(alignment_path)?;
+    let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
+    let c_str = ffi::CString::new(alignment_path)
+        .context("Internal 0 byte contained in alignment file name")?;
+    let idx: *mut htslib::hts_idx_t = unsafe { htslib::sam_index_load(htsfile, c_str.as_ptr()) };
+    assert!(!idx.is_null(), "Unable to load index for alignment file!");
+
+    unsafe {
+        let is_cram = htsfile
+            .as_ref()
+            .with_context(|| "Problem acessing htsfile")?
+            .is_cram()
+            != 0;
+
+        if is_cram {
+            let reference = reference
+                .context("Alignment file is CRAM format but no reference file is specified!")?;
+            rhtslib_reimplement::rhtslib_set_reference(htsfile, reference)?;
+        }
+    }
+
+    Ok((htsfile, idx, header))
+}
+
+pub fn extract_allele_lengths(
     tr_region: &mut TandemRepeat,
     htsfile: *mut htslib::htsFile,
     itr: *mut htslib::hts_itr_t,
@@ -24,7 +126,7 @@ pub fn fetch_allele_lengths(
 ) -> Result<()> {
     let mut allele_lengths: HashMap<i64, f32> = HashMap::new();
     let mut record = Record::new();
-    while let Some(result) = rhtslib_read(htsfile, itr, &mut record) {
+    while let Some(result) = rhtslib_reimplement::rhtslib_read(htsfile, itr, &mut record) {
         // Should we return an Error here or just continue to the next iteration?
         result.with_context(|| {
             format!(
@@ -149,9 +251,9 @@ pub fn tr_cn_from_cnvs(
 pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
     let mut map: HashMap<usize, Array<f32, Dim<[usize; 2]>>> = HashMap::new();
     for cn in copy_numbers {
-        if *cn == 0 {
-            continue;
-        }
+        // if *cn == 0 {
+        //     continue;
+        // }
         map.insert(*cn, partitions(*cn));
     }
 
@@ -189,41 +291,5 @@ mod tests {
         let tr_region_len = allele_length_from_cigar(&cigar, cigar_start, 40, 50).unwrap();
 
         assert_eq!(5, tr_region_len);
-    }
-}
-
-// Functions below that are prefixed with 'rhtslib_' are private functions in
-// rust_htslib, and are copied from there to be used in this library.
-// It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading
-// alignment files, but those structs caused segfaults when reading CRAM files (not BAM, interestingly)
-// when they were dropped, even on trivial tests. -> submit issue on GitHub?
-fn rhtslib_read(
-    htsfile: *mut htslib::htsFile,
-    itr: *mut htslib::hts_itr_t,
-    record: &mut Record,
-) -> Option<Result<(), htsError>> {
-    match rhtslib_itr_next(htsfile, itr, &mut record.inner as *mut htslib::bam1_t) {
-        -1 => None,
-        -2 => Some(Err(htsError::BamTruncatedRecord)),
-        -4 => Some(Err(htsError::BamInvalidRecord)),
-        _ => {
-            // record.set_header(Rc::clone(&self.header)); // this does not seem to be necessary?
-            Some(Ok(()))
-        }
-    }
-}
-
-fn rhtslib_itr_next(
-    htsfile: *mut htslib::htsFile,
-    itr: *mut htslib::hts_itr_t,
-    record: *mut htslib::bam1_t,
-) -> i32 {
-    unsafe {
-        htslib::hts_itr_next(
-            (*htsfile).fp.bgzf,
-            itr,
-            record as *mut ::std::os::raw::c_void,
-            htsfile as *mut ::std::os::raw::c_void,
-        )
     }
 }
