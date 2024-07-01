@@ -1,15 +1,16 @@
+pub mod cli;
 pub mod genotyping;
 pub mod repeat;
-pub mod rhtslib_reimplement;
+pub mod rhtslib_reimplements;
 pub mod utils;
 
 use crate::{
     repeat::TandemRepeat,
     utils::{cigar_utils, CopyNumberVariant},
 };
-
 use anyhow::{Context, Result};
 use genotyping::partitions;
+use log::{debug, error};
 use ndarray::{Array, Dim};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
@@ -35,7 +36,7 @@ pub fn run(
     reads_per_allele: usize,
     tidx: usize,
 ) {
-    eprintln!("Launching thread {tidx}");
+    debug!("Launching thread {tidx}");
 
     let (htsfile, idx, header) =
         thread_setup(alignment, reference).expect("Error during thread setup");
@@ -43,21 +44,21 @@ pub fn run(
     for tr_region in tr_regions {
         let fetch_request = tr_region.reference_info.get_fetch_definition_s();
         if !cnv_regions.is_empty() {
-            if let Err(e) = tr_cn_from_cnvs(tr_region, &cnv_regions) {
-                eprintln!("Thread {tidx}: Error setting copy number, skipping locus {fetch_request}: {e:?}");
+            if let Err(e) = tr_cn_from_cnvs(tr_region, cnv_regions) {
+                error!("Thread {tidx}: Error setting copy number, skipping locus {fetch_request}: {e:?}");
                 continue;
             };
         }
 
         let Ok(itr) =
-            rhtslib_reimplement::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
+            rhtslib_reimplements::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
         else {
-            eprintln!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
+            error!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
             continue;
         };
 
         if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
-            eprintln!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
+            error!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
             // destroy iterator and continue to the next repeat region
             unsafe {
                 htslib::hts_itr_destroy(itr);
@@ -70,16 +71,9 @@ pub fn run(
         }
 
         if let Err(e) =
-            // Should we do Arc::clone for each tr_region or could we do it once per thread instead?
-            genotyping::estimate_genotype(
-                tr_region,
-                reads_per_allele,
-                Arc::clone(&partitions_map),
-            )
+            genotyping::estimate_genotype(tr_region, reads_per_allele, Arc::clone(partitions_map))
         {
-            eprintln!(
-                "Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}"
-            );
+            error!("Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}");
             continue;
         }
     }
@@ -87,14 +81,14 @@ pub fn run(
         htslib::hts_close(htsfile);
     }
 
-    eprintln!("Finished on thread {tidx}");
+    debug!("Finished on thread {tidx}");
 }
 
 fn thread_setup(
     alignment_path: &str,
     reference: Option<&String>,
 ) -> Result<(*mut htsFile, *mut htslib::hts_idx_t, *mut htslib::sam_hdr_t)> {
-    let htsfile = rhtslib_reimplement::rhtslib_from_path(alignment_path)?;
+    let htsfile = rhtslib_reimplements::rhtslib_from_path(alignment_path)?;
     let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
     let c_str = ffi::CString::new(alignment_path)
         .context("Internal 0 byte contained in alignment file name")?;
@@ -111,7 +105,7 @@ fn thread_setup(
         if is_cram {
             let reference = reference
                 .context("Alignment file is CRAM format but no reference file is specified!")?;
-            rhtslib_reimplement::rhtslib_set_reference(htsfile, reference)?;
+            rhtslib_reimplements::rhtslib_set_reference(htsfile, reference)?;
         }
     }
 
@@ -126,7 +120,7 @@ pub fn extract_allele_lengths(
 ) -> Result<()> {
     let mut allele_lengths: HashMap<i64, f32> = HashMap::new();
     let mut record = Record::new();
-    while let Some(result) = rhtslib_reimplement::rhtslib_read(htsfile, itr, &mut record) {
+    while let Some(result) = rhtslib_reimplements::rhtslib_read(htsfile, itr, &mut record) {
         // Should we return an Error here or just continue to the next iteration?
         result.with_context(|| {
             format!(
@@ -135,7 +129,7 @@ pub fn extract_allele_lengths(
             )
         })?;
         // if result.is_err() {
-        //     // eprintln!(
+        //     // error!(
         //     //     "Faulty read for region {}",
         //     //     tr_region.reference_info.get_fetch_definition_s()
         //     // );

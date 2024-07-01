@@ -1,4 +1,4 @@
-//! # Utils
+//! # Root for utility functions in ConSTRain
 //!
 //! Modules containing utility functions and structs for the `ConSTRain` library.
 //! This top-level module contains miscellaneous utility functions,

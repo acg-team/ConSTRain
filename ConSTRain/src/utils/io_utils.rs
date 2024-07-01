@@ -5,19 +5,57 @@
 //! VCF files.
 use anyhow::{Context, Result};
 use csv::ReaderBuilder;
-use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer};
+use log::info;
+use rust_htslib::{
+    bam::HeaderView,
+    bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer},
+    htslib,
+};
 use serde_json::Value;
 use std::{collections::HashSet, fs::File, io::BufReader};
 
-use crate::repeat::{RepeatReferenceInfo, TandemRepeat};
-use crate::utils::CopyNumberVariant;
+use crate::{
+    repeat::{RepeatReferenceInfo, TandemRepeat},
+    rhtslib_reimplements,
+    utils::CopyNumberVariant,
+};
+
+/// Read tandem repeats from `repeats` (a bed file) and set their baseline copy number based
+/// on the genome architecture specified in `ploidy` (a json). Optionally, parse copy number
+/// variants from `cnvs` (a bed file) to be used for updating the copy number of specific
+/// tandem repeats located in those regions later.
+pub fn parse_tandem_repeats(
+    repeats: &str,
+    ploidy: &str,
+    cnvs: Option<&str>,
+) -> Result<(Vec<TandemRepeat>, Vec<CopyNumberVariant>, Vec<usize>)> {
+    let mut observed_copy_numbers: HashSet<usize> = HashSet::new();
+    let mut tr_regions: Vec<TandemRepeat> = Vec::new();
+
+    trs_from_bed(repeats, ploidy, &mut tr_regions, &mut observed_copy_numbers)?;
+    info!("Read {} TR regions", tr_regions.len());
+
+    let mut cnv_regions: Vec<CopyNumberVariant> = Vec::new();
+    if let Some(cnv_file) = cnvs {
+        cnvs_from_bed(cnv_file, &mut cnv_regions, &mut observed_copy_numbers)?;
+        info!("Read {} CNVs", cnv_regions.len());
+    }
+
+    let mut observed_copy_numbers: Vec<usize> = observed_copy_numbers
+        .iter()
+        .filter_map(|x| if 0 < *x && *x <= 20 { Some(*x) } else { None }) // ConSTRain supports copy numbers from 1 to 20 for now
+        .collect();
+    observed_copy_numbers.sort();
+
+    Ok((tr_regions, cnv_regions, observed_copy_numbers))
+}
 
 /// Read tandem repeat regions specified in the bed file at `bed_path` into `tr_buffer`.
 /// Copy numbers of tandem repeats are set based on the values specified in `ploidy_path`, which should be a
 /// json file mapping contig identifiers to copy number values. All copy number values that are observed while
-/// reading TR regions are added to `cn_buffer`, which can be useful later to generate partitions for only the
+/// reading TR regions are added to `cn_buffer`, which is used later to generate partitions for only the
 /// relevant (i.e., observed) copy numbers.
-pub fn trs_from_bed(
+fn trs_from_bed(
     bed_path: &str,
     ploidy_path: &str,
     tr_buffer: &mut Vec<TandemRepeat>,
@@ -57,13 +95,13 @@ pub fn trs_from_bed(
 
 /// Read contig-level baseline copy number values from a json file at `path`.
 /// The json should contain contig names as keys and integer copy numbers as values, e.g.:
-/// ```
+/// `
 /// {
 ///     "chr1": 2,
 ///     ... other chromosomes ...
 ///     "chrY": 0
 /// }
-/// ```
+/// `
 fn ploidy_from_json(path: &str) -> Result<Value> {
     let file = File::open(path).with_context(|| format!("Could not read json {path}"))?;
     let reader = BufReader::new(file);
@@ -74,8 +112,8 @@ fn ploidy_from_json(path: &str) -> Result<Value> {
 
 /// Read copy number variants specified in the bed file at `cnv_path` into `cnv_buffer`.
 /// All copy number values that are observed while reading TR regions are added to `cn_buffer`,
-/// which can be useful later to generate partitions for only the relevant (i.e., observed) copy numbers.
-pub fn cnvs_from_bed(
+/// which is used later to generate partitions for only the relevant (i.e., observed) copy numbers.
+fn cnvs_from_bed(
     cnv_path: &str,
     cnv_buffer: &mut Vec<CopyNumberVariant>,
     observed_cn_buffer: &mut HashSet<usize>,
@@ -94,6 +132,34 @@ pub fn cnvs_from_bed(
     }
 
     Ok(())
+}
+
+/// Extract all target names and their lengths from an alignment file's header.
+pub fn tnames_tlens_from_header(alignment_path: &str) -> Result<(Vec<String>, Vec<u64>)> {
+    let htsfile = rhtslib_reimplements::rhtslib_from_path(alignment_path)?;
+    let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
+    let hview = HeaderView::new(header);
+    unsafe {
+        htslib::hts_close(htsfile);
+    }
+
+    let mut target_names = Vec::<String>::new();
+    let mut target_lengths = Vec::<u64>::new(); // tlens are u64 in rust_htslib
+
+    for target in &hview.target_names() {
+        let tid = hview
+            .tid(target)
+            .context("Could not get target ID from header")?;
+        let tlen = hview
+            .target_len(tid)
+            .context("Could not get target length from header")?;
+        let tname = std::str::from_utf8(target)?.to_owned();
+
+        target_lengths.push(tlen);
+        target_names.push(tname);
+    }
+
+    Ok((target_names, target_lengths))
 }
 
 /// Write (genotyped) tandem repeat regions to a vcf file.

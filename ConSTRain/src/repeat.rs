@@ -1,4 +1,4 @@
-//! # Repeat
+//! # Structs to represent genomic tandem repeats
 //!
 //! Module containing structs to represent tandem repeats.
 //! [`TandemRepeat`] is the struct that represents an observation of a tandem

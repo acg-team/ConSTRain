@@ -1,3 +1,5 @@
+//! # Reimplementations of rust htslib private functions to use in ConSTRain
+//!
 //! Functions in this module are prefixed with 'rhtslib_'. They  are private functions in
 //! rust_htslib and are copied from there to be used in this binary.
 //! It would be nicer to use rust_htslib's structs (e.g., IndexedReader) for reading
@@ -26,11 +28,13 @@ pub fn rhtslib_hts_open(path: &[u8], mode: &[u8]) -> Result<*mut htslib::htsFile
     Ok(ret)
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn rhtslib_set_reference<P: AsRef<Path>>(htsfile: *mut htslib::htsFile, path: P) -> Result<()> {
     unsafe { bam::set_fai_filename(htsfile, path).context("Error setting reference file")? };
     Ok(())
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn rhtslib_fetch_by_str(
     idx: *mut htslib::hts_idx_t,
     header: *mut htslib::sam_hdr_t,
@@ -61,6 +65,7 @@ pub fn rhtslib_read(
     }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn rhtslib_itr_next(
     htsfile: *mut htslib::htsFile,
     itr: *mut htslib::hts_itr_t,

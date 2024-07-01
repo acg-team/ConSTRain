@@ -129,9 +129,9 @@ fn most_likely_allele_distribution(
     let argmin: Vec<usize> = error_sums
         .iter()
         .enumerate()
-        // .filter_map(|(x, y)| if *y == min { Some(x) } else { None })
         .filter_map(|(x, y)| {
-            if (*y - min) < f32::EPSILON {
+            // For each value, check if it equals the minimum
+            if (*y - min).abs() < f32::EPSILON {
                 Some(x)
             } else {
                 None
