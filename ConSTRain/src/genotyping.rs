@@ -1,10 +1,12 @@
-use crate::repeat::TandemRepeat;
-use crate::utils::{self, N_PARTITIONS};
-
+//! # Estimating genotypes from allele length distributions
 use anyhow::{bail, Context, Result};
 use ndarray::prelude::*;
 use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
+use crate::{repeat::TandemRepeat, utils::{self, N_PARTITIONS}};
+
+/// Estimate the most likely underlying genotype that produced the
+/// observed allele distribution stored on the `tr_region` struct.
 pub fn estimate_genotype(
     tr_region: &mut TandemRepeat,
     min_reads_per_allele: usize,
@@ -42,7 +44,9 @@ pub fn estimate_genotype(
             )
         })?;
 
-    // at least `threshold_val` number of reads must support a give allele length for it to be considered
+    // At least `threshold_val` number of reads must support a give allele length for it to be considered.
+    // If the observed count for a specific allele is closer to 0 than to the expected count for an allele
+    // that is present once, we ignore this allele.
     let threshold_val = n_mapped_reads as f32 / tr_region.copy_number as f32 * 0.5;
     let valid_partition_idxs = find_valid_partition_idxs(partitions, &counts, threshold_val);
 
@@ -58,17 +62,17 @@ pub fn estimate_genotype(
 
     let valid_partitions = partitions.select(Axis(0), &valid_partition_idxs);
 
-    let argmin = most_likely_allele_distribution(
+    let argmin = most_likely_partition_idx(
         &valid_partitions,
         n_mapped_reads,
         tr_region.copy_number,
         &counts,
     )?;
-    let allele_distribution = valid_partitions.slice(s![argmin, ..]);
+    let most_likely_partition = valid_partitions.slice(s![argmin, ..]);
 
     let mut genotype: Vec<(i64, f32)> = allele_lengths
         .iter()
-        .zip(allele_distribution.iter())
+        .zip(most_likely_partition.iter())
         .filter_map(|(x, y)| if *y > 0. { Some((*x, *y)) } else { None })
         .collect();
     genotype.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -77,6 +81,11 @@ pub fn estimate_genotype(
     Ok(())
 }
 
+/// Not all partitions may be relevant for estimating the genotype of the
+/// observed allele length distribution. Specifically, some partitions may contain
+/// more distinct alleles than have been observed in the alignment. For example, we
+/// don't want to consider partition `[1., 1., 1.]` for a TR with copy number 3 when
+/// the observed allele distribution is `[20., 8., 0.]`
 fn find_valid_partition_idxs(
     partitions: &Array<f32, Dim<[usize; 2]>>,
     counts: &Array<f32, Dim<[usize; 1]>>,
@@ -112,7 +121,8 @@ fn find_valid_partition_idxs(
     valid_partitions
 }
 
-fn most_likely_allele_distribution(
+/// Return the indexes of the most likely genotype to underly the observed allele distribution
+fn most_likely_partition_idx(
     partitions: &Array<f32, Dim<[usize; 2]>>,
     n_mapped_reads: usize,
     copy_number: usize,
@@ -148,8 +158,11 @@ fn most_likely_allele_distribution(
     }
 }
 
+/// Generate all partitions of for integer 'n' ([Wikipedia](https://en.wikipedia.org/wiki/Integer_partition), [Mathworld](https://mathworld.wolfram.com/Partition.html)).
+/// All partitions are padded with zeroes to be of size 'n', and values are represented by f32s.
+/// This is because the partitions will be used to calculate a mean-squared errors later.
+/// Implementation based on the iterative algorithm described in <https://jeromekelleher.net/category/combinatorics>.
 pub fn partitions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
-    // https://jeromekelleher.net/category/combinatorics
     if n == 0 {
         return arr2(&[[]]);
     }
@@ -251,7 +264,7 @@ mod tests {
 
         assert_eq!(
             1,
-            most_likely_allele_distribution(&partitions, n_reads, cn, &counts).unwrap()
+            most_likely_partition_idx(&partitions, n_reads, cn, &counts).unwrap()
         );
     }
 
@@ -262,7 +275,7 @@ mod tests {
         let cn = 3;
         let counts = arr1(&[20., 10., 0.]);
 
-        let res = most_likely_allele_distribution(&partitions, n_reads, cn, &counts);
+        let res = most_likely_partition_idx(&partitions, n_reads, cn, &counts);
         assert!(res.is_err());
     }
 

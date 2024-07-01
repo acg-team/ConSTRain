@@ -1,3 +1,4 @@
+//! # Command line interface for `ConSTRain`
 use crate::utils;
 use anyhow::{bail, Context, Result};
 use clap::Parser;

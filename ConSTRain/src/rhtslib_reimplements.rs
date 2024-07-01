@@ -1,4 +1,4 @@
-//! # Reimplementations of rust htslib private functions to use in ConSTRain
+//! # Reimplementations of rust htslib private functions to use in `ConSTRain`
 //!
 //! Functions in this module are prefixed with 'rhtslib_'. They  are private functions in
 //! rust_htslib and are copied from there to be used in this binary.

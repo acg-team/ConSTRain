@@ -1,4 +1,4 @@
-//! # Root for utility functions in ConSTRain
+//! # Root for utility functions in `ConSTRain`
 //!
 //! Modules containing utility functions and structs for the `ConSTRain` library.
 //! This top-level module contains miscellaneous utility functions,
@@ -10,7 +10,7 @@ use std::{cmp, path::Path};
 pub mod cigar_utils;
 pub mod io_utils;
 
-/// A structure to represent Copy Number Variants
+/// Struct to represent Copy Number Variants
 #[derive(Debug, serde::Deserialize)]
 pub struct CopyNumberVariant {
     pub seqname: String,

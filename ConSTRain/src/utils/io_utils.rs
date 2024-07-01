@@ -3,16 +3,20 @@
 //! Home of I/O functionality needed in the `ConSTRain` library. Provides
 //! functionality to serialize/deserialze tandem repeats from BED files,
 //! VCF files.
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use csv::ReaderBuilder;
-use log::info;
+use log::{error, info};
 use rust_htslib::{
     bam::HeaderView,
     bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer},
     htslib,
 };
 use serde_json::Value;
-use std::{collections::HashSet, fs::File, io::BufReader};
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::BufReader,
+};
 
 use crate::{
     repeat::{RepeatReferenceInfo, TandemRepeat},
@@ -22,23 +26,35 @@ use crate::{
 
 /// Read tandem repeats from `repeats` (a bed file) and set their baseline copy number based
 /// on the genome architecture specified in `ploidy` (a json). Optionally, parse copy number
-/// variants from `cnvs` (a bed file) to be used for updating the copy number of specific
-/// tandem repeats located in those regions later.
+/// variants from `cnvs` (a bed file) and update the copy number of tandem repeats located
+/// in those regions.
 pub fn parse_tandem_repeats(
     repeats: &str,
     ploidy: &str,
     cnvs: Option<&str>,
-) -> Result<(Vec<TandemRepeat>, Vec<CopyNumberVariant>, Vec<usize>)> {
+) -> Result<(Vec<TandemRepeat>, Vec<usize>)> {
     let mut observed_copy_numbers: HashSet<usize> = HashSet::new();
     let mut tr_regions: Vec<TandemRepeat> = Vec::new();
 
     trs_from_bed(repeats, ploidy, &mut tr_regions, &mut observed_copy_numbers)?;
-    info!("Read {} TR regions", tr_regions.len());
+    info!("Read {} TR regions from {}", tr_regions.len(), repeats);
 
-    let mut cnv_regions: Vec<CopyNumberVariant> = Vec::new();
     if let Some(cnv_file) = cnvs {
-        cnvs_from_bed(cnv_file, &mut cnv_regions, &mut observed_copy_numbers)?;
-        info!("Read {} CNVs", cnv_regions.len());
+        let cnv_map = cnvs_from_bed(cnv_file, &mut observed_copy_numbers)?;
+        info!("Read CNVs regions from {}", cnv_file);
+        for tr_region in &mut tr_regions {
+            if let Some(cnv_vec) = cnv_map.get(&tr_region.reference_info.seqname) {
+                if let Err(e) = tr_region.set_cn_from_cnvs(cnv_vec) {
+                    error!(
+                        "Error setting copy number from CNV for locus {}: {e:?}",
+                        tr_region.reference_info.get_fetch_definition_s()
+                    );
+                    tr_region.set_cn(0); // set CN to 0. Or should we continue with baseline CN here?
+                    continue;
+                };
+            };
+        }
+        info!("Updated TR copy numbers using CNVs");
     }
 
     let mut observed_copy_numbers: Vec<usize> = observed_copy_numbers
@@ -47,7 +63,7 @@ pub fn parse_tandem_repeats(
         .collect();
     observed_copy_numbers.sort();
 
-    Ok((tr_regions, cnv_regions, observed_copy_numbers))
+    Ok((tr_regions, observed_copy_numbers))
 }
 
 /// Read tandem repeat regions specified in the bed file at `bed_path` into `tr_buffer`.
@@ -62,16 +78,21 @@ fn trs_from_bed(
     observed_cn_buffer: &mut HashSet<usize>,
 ) -> Result<()> {
     let ploidy = ploidy_from_json(ploidy_path)?;
-
     let mut bed_reader = ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
         .from_path(bed_path)
         .with_context(|| format!("Could not read bed file {bed_path}"))?;
 
-    for result in bed_reader.deserialize() {
+    for result in bed_reader.deserialize() {        
         let ref_info: RepeatReferenceInfo =
             result.with_context(|| format!("Failed to deserialize bed record in {bed_path}"))?;
+        if !tr_buffer.is_empty() {
+            let prev_tr = &tr_buffer[tr_buffer.len() - 1];
+            if prev_tr.reference_info.end > ref_info.start && prev_tr.reference_info.seqname == ref_info.seqname {
+                bail!("TR file {bed_path} is not coordinate sorted")
+            }
+        }
 
         // Get base copy number of contig from ploidy json.
         // If the contig does not exist in the json, default to CN 0 (which means TRs on this contig won't be genotyped)
@@ -110,28 +131,37 @@ fn ploidy_from_json(path: &str) -> Result<Value> {
     Ok(result)
 }
 
-/// Read copy number variants specified in the bed file at `cnv_path` into `cnv_buffer`.
+/// Read copy number variants specified in the bed file at `cnv_path` into a HashMap where keys are contig
+/// names and values are vectors of CNVs. Ensure that CNVs are coordinate sorted.
 /// All copy number values that are observed while reading TR regions are added to `cn_buffer`,
 /// which is used later to generate partitions for only the relevant (i.e., observed) copy numbers.
 fn cnvs_from_bed(
     cnv_path: &str,
-    cnv_buffer: &mut Vec<CopyNumberVariant>,
     observed_cn_buffer: &mut HashSet<usize>,
-) -> Result<()> {
+) -> Result<HashMap<String, Vec<CopyNumberVariant>>> {
     let mut bed_reader = ReaderBuilder::new()
         .has_headers(false)
         .delimiter(b'\t')
         .from_path(cnv_path)
         .with_context(|| format!("Could not read bed file {cnv_path}"))?;
 
+    let mut cnv_map: HashMap<String, Vec<CopyNumberVariant>> = HashMap::new();
     for result in bed_reader.deserialize() {
         let cnv: CopyNumberVariant =
             result.with_context(|| format!("Failed to deserialize bed record in {cnv_path}"))?;
         observed_cn_buffer.insert(cnv.cn);
-        cnv_buffer.push(cnv);
+        if let Some(cnv_vec) = cnv_map.get_mut(&cnv.seqname) {
+            let prev_cnv = &cnv_vec[cnv_vec.len() - 1];
+            if prev_cnv.end > cnv.start && prev_cnv.seqname == cnv.seqname {
+                bail!("CNV file {cnv_path} is not coordinate sorted");
+            }
+            cnv_vec.push(cnv);
+        } else {
+            cnv_map.insert(cnv.seqname.clone(), vec![cnv]);
+        }
     }
 
-    Ok(())
+    Ok(cnv_map)
 }
 
 /// Extract all target names and their lengths from an alignment file's header.

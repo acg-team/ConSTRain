@@ -6,8 +6,11 @@
 //! copy number in a specific sample. It is also associated with a [`RepeatReferenceInfo`] struct,
 //! which encodes how a repetetive region looks in the reference genome.
 //! `ConSTRain` assumes that TRs are perfect tandem repetitions of a given nucleotide motif.
+use anyhow::Result;
 use ndarray::prelude::*;
 use std::collections::HashMap;
+
+use crate::utils::{self, CopyNumberVariant};
 
 /// `TandemRepeat` represents an observation of a tandem in an alignment.
 /// The representation of the locus in the reference genome is contained in `reference_info`. The
@@ -31,6 +34,42 @@ impl TandemRepeat {
     }
     pub fn set_cn(&mut self, new_cn: usize) {
         self.copy_number = new_cn;
+    }
+    /// Search for a CNV in `cnv_regions` that overlaps with this tandem repeat.
+    /// If there is such an overlap: update `self.copy_number`.
+    /// Assumes that all entries in `cnv_regions` are on the same contig as this tandem repeat.
+    /// Furthermore, we assume that `cnv_regions` is coordinate sorted. **These assumptions
+    /// are not checked here. Improper input will likely result in the wrong copy number being
+    /// set!**
+    pub fn set_cn_from_cnvs(&mut self, cnv_regions: &[CopyNumberVariant]) -> Result<()> {
+        let region_len = self.reference_info.end - self.reference_info.start;
+        for cnv in cnv_regions {
+            if self.reference_info.start > cnv.end {
+                // The TR region lies beyond the current CNV on the contig. Since CNVs are coordinate
+                // sorted, we can be confident that no other CNV overlaps the TR.
+                break;
+            }
+
+            let overlap = utils::range_overlap(
+                self.reference_info.start,
+                self.reference_info.end - 1,
+                cnv.start,
+                cnv.end - 1,
+            )?;
+
+            if overlap == region_len {
+                self.set_cn(cnv.cn);
+                // TRs can intersect with at most one CNV, we found a hit so we can return
+                break;
+            } else if overlap > 0 {
+                // TR partially overlaps CNV, impossible to set sensible CN for TR. Set to 0 so it gets skipped
+                // Should we return an Err here instead?
+                self.set_cn(0);
+                // TRs can intersect with at most one CNV, we found a (partial) hit so we can return
+                break;
+            }
+        }
+        Ok(())
     }
     pub fn allele_freqs_as_tuples(&self) -> Vec<(i64, f32)> {
         match &self.allele_lengths {

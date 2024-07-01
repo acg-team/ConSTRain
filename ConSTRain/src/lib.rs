@@ -1,13 +1,12 @@
+//! # ConSTRain
+//! 
+//! Copy number-guided STR allele inference.
 pub mod cli;
 pub mod genotyping;
 pub mod repeat;
 pub mod rhtslib_reimplements;
 pub mod utils;
 
-use crate::{
-    repeat::TandemRepeat,
-    utils::{cigar_utils, CopyNumberVariant},
-};
 use anyhow::{Context, Result};
 use genotyping::partitions;
 use log::{debug, error};
@@ -17,6 +16,11 @@ use rust_htslib::{
     htslib::{self, htsFile},
 };
 use std::{collections::HashMap, ffi, sync::Arc};
+
+use crate::{
+    repeat::TandemRepeat,
+    utils::cigar_utils,
+};
 
 /// The main work of ConSTRain happens in this `run` function.
 /// It is meant to be called from inside a rayon parallel iterator.
@@ -28,10 +32,9 @@ use std::{collections::HashMap, ffi, sync::Arc};
 /// to the next tandem repeat region.
 pub fn run(
     tr_regions: &mut [TandemRepeat],
-    cnv_regions: &[CopyNumberVariant],
     partitions_map: &Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
     alignment: &str,
-    reference: Option<&String>,
+    reference: Option<&str>,
     flanksize: usize,
     reads_per_allele: usize,
     tidx: usize,
@@ -43,12 +46,6 @@ pub fn run(
 
     for tr_region in tr_regions {
         let fetch_request = tr_region.reference_info.get_fetch_definition_s();
-        if !cnv_regions.is_empty() {
-            if let Err(e) = tr_cn_from_cnvs(tr_region, cnv_regions) {
-                error!("Thread {tidx}: Error setting copy number, skipping locus {fetch_request}: {e:?}");
-                continue;
-            };
-        }
 
         let Ok(itr) =
             rhtslib_reimplements::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
@@ -86,7 +83,7 @@ pub fn run(
 
 fn thread_setup(
     alignment_path: &str,
-    reference: Option<&String>,
+    reference: Option<&str>,
 ) -> Result<(*mut htsFile, *mut htslib::hts_idx_t, *mut htslib::sam_hdr_t)> {
     let htsfile = rhtslib_reimplements::rhtslib_from_path(alignment_path)?;
     let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
@@ -208,46 +205,9 @@ fn allele_length_from_cigar(
     Ok(tr_region_len)
 }
 
-pub fn tr_cn_from_cnvs(
-    tr_region: &mut TandemRepeat,
-    cnv_regions: &[CopyNumberVariant],
-) -> Result<()> {
-    // Currently extremely basic one vs all comparison strategy
-    // Check how GenomicRanges R library (or bedtools?) finds range
-    // overlaps between two lists of entities
-    let region_len = tr_region.reference_info.end - tr_region.reference_info.start;
-    for cnv in cnv_regions {
-        if tr_region.reference_info.seqname != cnv.seqname {
-            continue;
-        }
-        let overlap = utils::range_overlap(
-            tr_region.reference_info.start,
-            tr_region.reference_info.end - 1,
-            cnv.start,
-            cnv.end - 1,
-        )?;
-
-        if overlap == region_len {
-            tr_region.set_cn(cnv.cn);
-            // TRs can intersect with at most one CNV, we found a hit so we can return
-            return Ok(());
-        } else if overlap > 0 {
-            // TR partially overlaps CNV, impossible to set sensible CN for TR. Set to 0 so it gets skipped
-            // Should we return an Err here instead?
-            tr_region.set_cn(0);
-            // TRs can intersect with at most one CNV, we found a hit so we can return
-            return Ok(());
-        }
-    }
-    Ok(())
-}
-
 pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
     let mut map: HashMap<usize, Array<f32, Dim<[usize; 2]>>> = HashMap::new();
     for cn in copy_numbers {
-        // if *cn == 0 {
-        //     continue;
-        // }
         map.insert(*cn, partitions(*cn));
     }
 
