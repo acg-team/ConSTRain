@@ -84,12 +84,14 @@ fn trs_from_bed(
         .from_path(bed_path)
         .with_context(|| format!("Could not read bed file {bed_path}"))?;
 
-    for result in bed_reader.deserialize() {        
+    for result in bed_reader.deserialize() {
         let ref_info: RepeatReferenceInfo =
             result.with_context(|| format!("Failed to deserialize bed record in {bed_path}"))?;
         if !tr_buffer.is_empty() {
             let prev_tr = &tr_buffer[tr_buffer.len() - 1];
-            if prev_tr.reference_info.end > ref_info.start && prev_tr.reference_info.seqname == ref_info.seqname {
+            if prev_tr.reference_info.end > ref_info.start
+                && prev_tr.reference_info.seqname == ref_info.seqname
+            {
                 bail!("TR file {bed_path} is not coordinate sorted")
             }
         }

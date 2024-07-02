@@ -1,6 +1,8 @@
 //! # ConSTRain
-//! 
-//! Copy number-guided STR allele inference.
+//!
+//! This library serves as the backbone for the [ConSTRain binary](https://github.com/acg-team/ConSTRain),
+//! which is developed and maintained by the Applied Computational Genomics Team of the
+//! [Bioinformatics Centre](https://www.zhaw.ch/en/lsfm/institutes-centres/icls/bioinformatics/) at the Zürich University of Applied Sciences.
 pub mod cli;
 pub mod genotyping;
 pub mod repeat;
@@ -9,7 +11,7 @@ pub mod utils;
 
 use anyhow::{Context, Result};
 use genotyping::partitions;
-use log::{debug, error};
+use log::{debug, error, info};
 use ndarray::{Array, Dim};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
@@ -17,10 +19,7 @@ use rust_htslib::{
 };
 use std::{collections::HashMap, ffi, sync::Arc};
 
-use crate::{
-    repeat::TandemRepeat,
-    utils::cigar_utils,
-};
+use crate::{repeat::TandemRepeat, utils::cigar_utils};
 
 /// The main work of ConSTRain happens in this `run` function.
 /// It is meant to be called from inside a rayon parallel iterator.
@@ -206,6 +205,7 @@ fn allele_length_from_cigar(
 }
 
 pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
+    info!("Generating partitions for copy numbers {copy_numbers:?}");
     let mut map: HashMap<usize, Array<f32, Dim<[usize; 2]>>> = HashMap::new();
     for cn in copy_numbers {
         map.insert(*cn, partitions(*cn));

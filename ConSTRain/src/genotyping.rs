@@ -3,7 +3,10 @@ use anyhow::{bail, Context, Result};
 use ndarray::prelude::*;
 use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
-use crate::{repeat::TandemRepeat, utils::{self, N_PARTITIONS}};
+use crate::{
+    repeat::TandemRepeat,
+    utils::{self, N_PARTITIONS},
+};
 
 /// Estimate the most likely underlying genotype that produced the
 /// observed allele distribution stored on the `tr_region` struct.
