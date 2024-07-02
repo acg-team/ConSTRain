@@ -15,7 +15,7 @@ fn main() -> Result<()> {
     Builder::from_env(Env::default().default_filter_or("info")).init();
 
     // parse command line and validate inputs where possible
-    let config = Cli::try_parse()?;
+    let config = Cli::parse();
     let sample_name = config.get_sample_name()?;
     debug!("Parsed command line");
 
