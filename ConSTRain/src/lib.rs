@@ -11,7 +11,7 @@ pub mod utils;
 
 use anyhow::{Context, Result};
 use genotyping::partitions;
-use log::{debug, error, info};
+use log::{debug, info, trace};
 use ndarray::{Array, Dim};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
@@ -37,11 +37,11 @@ pub fn run(
     flanksize: usize,
     reads_per_allele: usize,
     tidx: usize,
-) {
+) -> Result<()> {
     debug!("Launching thread {tidx}");
 
     let (htsfile, idx, header) =
-        thread_setup(alignment, reference).expect("Error during thread setup");
+        thread_setup(alignment, reference).context("Error during thread setup")?;
 
     for tr_region in tr_regions {
         let fetch_request = tr_region.reference_info.get_fetch_definition_s();
@@ -49,12 +49,12 @@ pub fn run(
         let Ok(itr) =
             rhtslib_reimplements::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
         else {
-            error!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
+            trace!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
             continue;
         };
 
         if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
-            error!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
+            trace!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
             // destroy iterator and continue to the next repeat region
             unsafe {
                 htslib::hts_itr_destroy(itr);
@@ -69,7 +69,7 @@ pub fn run(
         if let Err(e) =
             genotyping::estimate_genotype(tr_region, reads_per_allele, Arc::clone(partitions_map))
         {
-            error!("Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}");
+            trace!("Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}");
             continue;
         }
     }
@@ -78,6 +78,7 @@ pub fn run(
     }
 
     debug!("Finished on thread {tidx}");
+    Ok(())
 }
 
 fn thread_setup(

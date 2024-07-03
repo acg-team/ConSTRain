@@ -58,7 +58,8 @@ fn main() -> Result<()> {
                     flanksize,
                     reads_per_allele,
                     tidx,
-                );
+                )
+                .expect("Error during genotyping");
             });
             info!("Finished genotyping");
 

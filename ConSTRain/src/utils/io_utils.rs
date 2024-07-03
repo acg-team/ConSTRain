@@ -101,7 +101,10 @@ fn trs_from_bed(
         // If the contig does not exist in the json, default to CN 0 (which means TRs on this contig won't be genotyped)
         let cn = ploidy[&ref_info.seqname].as_u64().unwrap_or(0) as usize;
         if cn == 0 {
-            warn!("Contig for TR '{}' was not found in the ploidy json file. Setting CN to 0", ref_info.get_fetch_definition_s());
+            warn!(
+                "Contig for TR '{}' was not found in the ploidy json file. Setting CN to 0",
+                ref_info.get_fetch_definition_s()
+            );
         }
 
         let tr_region = TandemRepeat {
