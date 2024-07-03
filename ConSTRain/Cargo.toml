@@ -21,6 +21,6 @@ env_logger = "0.11.3"
 log = "0.4.22"
 ndarray = "0.15.6"
 rayon = "*"
-rust-htslib = { version = "*", default-features = false, features = ["bzip2", "lzma"] }
+rust-htslib = { version = "0.47.0", default-features = false, features = ["bzip2", "lzma"] }
 serde = { version = "1.0.190", features = ["derive"] }
 serde_json = "*"
