@@ -5,7 +5,7 @@
 //! VCF files.
 use anyhow::{bail, Context, Result};
 use csv::ReaderBuilder;
-use log::{error, info};
+use log::{error, info, warn};
 use rust_htslib::{
     bam::HeaderView,
     bcf::{header::Header, record::GenotypeAllele, Format, Record, Writer},
@@ -87,20 +87,21 @@ fn trs_from_bed(
     for result in bed_reader.deserialize() {
         let ref_info: RepeatReferenceInfo =
             result.with_context(|| format!("Failed to deserialize bed record in {bed_path}"))?;
-        if !tr_buffer.is_empty() {
-            let prev_tr = &tr_buffer[tr_buffer.len() - 1];
-            if prev_tr.reference_info.end > ref_info.start
-                && prev_tr.reference_info.seqname == ref_info.seqname
-            {
-                bail!("TR file {bed_path} is not coordinate sorted")
-            }
-        }
+        // if !tr_buffer.is_empty() {
+        //     let prev_tr = &tr_buffer[tr_buffer.len() - 1];
+        //     if prev_tr.reference_info.end > ref_info.start
+        //         && prev_tr.reference_info.seqname == ref_info.seqname
+        //     {
+        //         // I'm not sure it's really necessary for TRs to be coordinate sorted and non-overlapping...
+        //         bail!("TR file {bed_path} is not coordinate sorted. Previous TR: {}, current TR: {}", prev_tr.reference_info.get_fetch_definition_s(), ref_info.get_fetch_definition_s())
+        //     }
+        // }
 
         // Get base copy number of contig from ploidy json.
         // If the contig does not exist in the json, default to CN 0 (which means TRs on this contig won't be genotyped)
         let cn = ploidy[&ref_info.seqname].as_u64().unwrap_or(0) as usize;
         if cn == 0 {
-            eprintln!("WARNING: contig for TR '{}' was not found in the ploidy json file. Setting CN to 0", ref_info.get_fetch_definition_s());
+            warn!("Contig for TR '{}' was not found in the ploidy json file. Setting CN to 0", ref_info.get_fetch_definition_s());
         }
 
         let tr_region = TandemRepeat {
