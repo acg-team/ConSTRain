@@ -47,6 +47,7 @@ pub fn estimate_genotype(
             )
         })?;
 
+    // TODO: FIGURE OUT IF THIS IS APPROPRIATE OR NOT
     // At least `threshold_val` number of reads must support a give allele length for it to be considered.
     // If the observed count for a specific allele is closer to 0 than to the expected count for an allele
     // that is present once, we ignore this allele.
@@ -107,7 +108,7 @@ fn find_valid_partition_idxs(
 
     // Next, find partitions where the first `threshold_idx` positions sum to
     // the number of alleles needed to make the current copy number
-    let valid_partitions = partitions
+    let valid_partition_idxs = partitions
         .slice(s![.., ..threshold_idx])
         .sum_axis(Axis(1))
         .iter()
@@ -121,7 +122,7 @@ fn find_valid_partition_idxs(
         })
         .collect();
 
-    valid_partitions
+    valid_partition_idxs
 }
 
 /// Return the indexes of the most likely genotype to underly the observed allele distribution
@@ -131,11 +132,15 @@ fn most_likely_partition_idx(
     copy_number: usize,
     counts: &Array<f32, Dim<[usize; 1]>>,
 ) -> Result<usize> {
-    let mut errors = partitions.mapv(|a| a * (n_mapped_reads / copy_number) as f32);
+    // we assume each allele contributes the same number of reads to the observed
+    // allele distribution. Thus, we find the expected number of reads per allele
+    // by dividing the total number of mapped reads by the copy number
+    let e_reads_per_allele = n_mapped_reads as f32 / copy_number as f32;
+    let mut errors = partitions.mapv(|a| a * e_reads_per_allele);
     errors = errors - counts.slice(s![..copy_number]);
-    errors.mapv_inplace(|x| x.powi(2));
-
+    errors.mapv_inplace(|x| x.abs());
     let error_sums = errors.sum_axis(Axis(1));
+
     // we can unwrap here: `min_by()` returns None if iterator is empty and we check earlier that it's not
     let min = *error_sums.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
 
@@ -273,12 +278,13 @@ mod tests {
 
     #[test]
     fn multiple_most_likely_gts() {
-        let partitions = arr2(&[[3., 0., 0.], [1., 1., 1.]]);
-        let n_reads = 30;
-        let cn = 3;
-        let counts = arr1(&[20., 10., 0.]);
+        let partitions = arr2(&[[2., 0.], [1., 1.]]);
+        let cn = 2;
+        let counts = arr1(&[3., 1.]);
+        let n_reads = 4; 
 
         let res = most_likely_partition_idx(&partitions, n_reads, cn, &counts);
+        println!("{res:?}");
         assert!(res.is_err());
     }
 

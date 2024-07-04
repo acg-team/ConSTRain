@@ -41,7 +41,7 @@ pub fn run(
     debug!("Launching thread {tidx}");
 
     let (htsfile, idx, header) =
-        thread_setup(alignment, reference).context("Error during thread setup")?;
+        thread_setup(alignment, reference).with_context(|| format!("Error during setup on thread {tidx}"))?;
 
     for tr_region in tr_regions {
         let fetch_request = tr_region.reference_info.get_fetch_definition_s();
