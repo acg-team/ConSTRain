@@ -33,7 +33,7 @@ pub struct CopyNumberVariant {
 /// assert_eq!(3, overlap);
 /// ```
 pub fn range_overlap(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> Result<i64> {
-    if (a_start >= a_end) | (b_start >= b_end) {
+    if (a_start > a_end) | (b_start > b_end) {
         bail!("a or b range not correctly specified")
     }
     Ok(cmp::max(

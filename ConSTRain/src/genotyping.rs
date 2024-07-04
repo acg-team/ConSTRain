@@ -51,20 +51,23 @@ pub fn estimate_genotype(
     // At least `threshold_val` number of reads must support a give allele length for it to be considered.
     // If the observed count for a specific allele is closer to 0 than to the expected count for an allele
     // that is present once, we ignore this allele.
-    let threshold_val = n_mapped_reads as f32 / tr_region.copy_number as f32 * 0.5;
-    let valid_partition_idxs = find_valid_partition_idxs(partitions, &counts, threshold_val);
+    
+    // let threshold_val: f32 = -1.;
+    // let threshold_val = n_mapped_reads as f32 / tr_region.copy_number as f32 * 0.5;
+    // let valid_partition_idxs = find_valid_partition_idxs(partitions, &counts, threshold_val);
 
-    if valid_partition_idxs.is_empty() {
-        // Not a single allele length observed with frequency over threshold, refuse to estimate
-        return Ok(());
-    } else if valid_partition_idxs.len() == 1 {
-        // Only one allele length observed with frequency over threshold, we can exit early
-        let genotype: Vec<(i64, f32)> = vec![(allele_lengths[0], tr_region.copy_number as f32)];
-        tr_region.genotype = Some(genotype);
-        return Ok(());
-    }
+    // if valid_partition_idxs.is_empty() {
+    //     // Not a single allele length observed with frequency over threshold, refuse to estimate
+    //     return Ok(());
+    // } else if valid_partition_idxs.len() == 1 {
+    //     // Only one allele length observed with frequency over threshold, we can exit early
+    //     let genotype: Vec<(i64, f32)> = vec![(allele_lengths[0], tr_region.copy_number as f32)];
+    //     tr_region.genotype = Some(genotype);
+    //     return Ok(());
+    // }
 
-    let valid_partitions = partitions.select(Axis(0), &valid_partition_idxs);
+    // let valid_partitions = partitions.select(Axis(0), &valid_partition_idxs);
+    let valid_partitions = partitions;
 
     let argmin = most_likely_partition_idx(
         &valid_partitions,
@@ -137,6 +140,8 @@ fn most_likely_partition_idx(
     // by dividing the total number of mapped reads by the copy number
     let e_reads_per_allele = n_mapped_reads as f32 / copy_number as f32;
     let mut errors = partitions.mapv(|a| a * e_reads_per_allele);
+
+    // Manhattan distance between observed and expected allele distributions
     errors = errors - counts.slice(s![..copy_number]);
     errors.mapv_inplace(|x| x.abs());
     let error_sums = errors.sum_axis(Axis(1));
@@ -284,7 +289,7 @@ mod tests {
         let n_reads = 4; 
 
         let res = most_likely_partition_idx(&partitions, n_reads, cn, &counts);
-        println!("{res:?}");
+
         assert!(res.is_err());
     }
 

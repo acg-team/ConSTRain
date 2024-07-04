@@ -13,7 +13,6 @@ use log::warn;
     long_about = None,
     propagate_version = true
 )]
-// #[command()]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
