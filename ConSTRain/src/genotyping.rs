@@ -1,5 +1,6 @@
 //! # Estimating genotypes from allele length distributions
 use anyhow::{bail, Context, Result};
+use log::info;
 use ndarray::prelude::*;
 use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
@@ -13,7 +14,7 @@ use crate::{
 pub fn estimate_genotype(
     tr_region: &mut TandemRepeat,
     min_reads_per_allele: usize,
-    partitions_map: Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
+    partitions_map: Arc<PartitionMap>,
 ) -> Result<()> {
     // Copy number for locus is 0, there is no need to estimate
     if tr_region.copy_number == 0 {
@@ -47,35 +48,9 @@ pub fn estimate_genotype(
             )
         })?;
 
-    // TODO: FIGURE OUT IF THIS IS APPROPRIATE OR NOT
-    // At least `threshold_val` number of reads must support a give allele length for it to be considered.
-    // If the observed count for a specific allele is closer to 0 than to the expected count for an allele
-    // that is present once, we ignore this allele.
-    
-    // let threshold_val: f32 = -1.;
-    // let threshold_val = n_mapped_reads as f32 / tr_region.copy_number as f32 * 0.5;
-    // let valid_partition_idxs = find_valid_partition_idxs(partitions, &counts, threshold_val);
-
-    // if valid_partition_idxs.is_empty() {
-    //     // Not a single allele length observed with frequency over threshold, refuse to estimate
-    //     return Ok(());
-    // } else if valid_partition_idxs.len() == 1 {
-    //     // Only one allele length observed with frequency over threshold, we can exit early
-    //     let genotype: Vec<(i64, f32)> = vec![(allele_lengths[0], tr_region.copy_number as f32)];
-    //     tr_region.genotype = Some(genotype);
-    //     return Ok(());
-    // }
-
-    // let valid_partitions = partitions.select(Axis(0), &valid_partition_idxs);
-    let valid_partitions = partitions;
-
-    let argmin = most_likely_partition_idx(
-        &valid_partitions,
-        n_mapped_reads,
-        tr_region.copy_number,
-        &counts,
-    )?;
-    let most_likely_partition = valid_partitions.slice(s![argmin, ..]);
+    let argmin =
+        most_likely_partition_idx(&partitions, n_mapped_reads, tr_region.copy_number, &counts)?;
+    let most_likely_partition = partitions.slice(s![argmin, ..]);
 
     let mut genotype: Vec<(i64, f32)> = allele_lengths
         .iter()
@@ -86,46 +61,6 @@ pub fn estimate_genotype(
     tr_region.genotype = Some(genotype);
 
     Ok(())
-}
-
-/// Not all partitions may be relevant for estimating the genotype of the
-/// observed allele length distribution. Specifically, some partitions may contain
-/// more distinct alleles than have been observed in the alignment. For example, we
-/// don't want to consider partition `[1., 1., 1.]` for a TR with copy number 3 when
-/// the observed allele distribution is `[20., 8., 0.]`
-fn find_valid_partition_idxs(
-    partitions: &Array<f32, Dim<[usize; 2]>>,
-    counts: &Array<f32, Dim<[usize; 1]>>,
-    threshold_value: f32,
-) -> Vec<usize> {
-    // First, find how many alleles are observed that are supported by
-    // enough reads (i.e., have more reads than `threshold_value`)
-    let mut threshold_idx = 0;
-    for count in counts {
-        if *count > threshold_value {
-            threshold_idx += 1;
-        } else {
-            break;
-        }
-    }
-
-    // Next, find partitions where the first `threshold_idx` positions sum to
-    // the number of alleles needed to make the current copy number
-    let valid_partition_idxs = partitions
-        .slice(s![.., ..threshold_idx])
-        .sum_axis(Axis(1))
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, val)| {
-            if *val as usize == partitions.shape()[1] {
-                Some(idx)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    valid_partition_idxs
 }
 
 /// Return the indexes of the most likely genotype to underly the observed allele distribution
@@ -171,9 +106,22 @@ fn most_likely_partition_idx(
     }
 }
 
-/// Generate all partitions of for integer 'n' ([Wikipedia](https://en.wikipedia.org/wiki/Integer_partition), [Mathworld](https://mathworld.wolfram.com/Partition.html)).
-/// All partitions are padded with zeroes to be of size 'n', and values are represented by f32s.
-/// This is because the partitions will be used to calculate a mean-squared errors later.
+pub type PartitionMap = HashMap<usize, Array<f32, Dim<[usize; 2]>>>;
+
+pub fn make_partitions_map(copy_numbers: &[usize]) -> PartitionMap {
+    info!("Generating partitions for copy numbers {copy_numbers:?}");
+    let mut map: PartitionMap = HashMap::new();
+    for cn in copy_numbers {
+        map.insert(*cn, partitions(*cn));
+    }
+
+    map
+}
+
+/// Generate all partitions of for integer 'n'
+///
+/// Background: ([Wikipedia](https://en.wikipedia.org/wiki/Integer_partition), [Mathworld](https://mathworld.wolfram.com/Partition.html)).
+/// All partitions are padded with zeroes to be of size 'n', and values are represented by f32s (because the partitions will be used to calculate errors later.)
 /// Implementation based on the iterative algorithm described in <https://jeromekelleher.net/category/combinatorics>.
 pub fn partitions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
     if n == 0 {
@@ -195,6 +143,8 @@ pub fn partitions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
             k += 1;
         }
         a[k] = x + y;
+        // Add the partitions in reversed order since we want
+        // descending partitions (just because I like them better)
         for (i, val) in a[..=k].iter().rev().enumerate() {
             results[[results_idx, i]] = *val as f32;
         }
@@ -286,20 +236,10 @@ mod tests {
         let partitions = arr2(&[[2., 0.], [1., 1.]]);
         let cn = 2;
         let counts = arr1(&[3., 1.]);
-        let n_reads = 4; 
+        let n_reads = 4;
 
         let res = most_likely_partition_idx(&partitions, n_reads, cn, &counts);
 
         assert!(res.is_err());
-    }
-
-    #[test]
-    fn valid_partitions() {
-        let arr: Array<f32, Dim<[usize; 2]>> = arr2(&[[3., 0., 0.], [2., 1., 0.], [1., 1., 1.]]);
-        let counts: Array<f32, Dim<[usize; 1]>> = arr1(&[10., 8., 2.]);
-        let threshold = 3.;
-        let valid_partitions = find_valid_partition_idxs(&arr, &counts, threshold);
-
-        assert_eq!(valid_partitions, vec![0, 1])
     }
 }

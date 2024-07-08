@@ -10,9 +10,8 @@ pub mod rhtslib_reimplements;
 pub mod utils;
 
 use anyhow::{Context, Result};
-use genotyping::partitions;
-use log::{debug, info, trace};
-use ndarray::{Array, Dim};
+use genotyping::PartitionMap;
+use log::{debug, trace};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
     htslib::{self, htsFile},
@@ -31,7 +30,7 @@ use crate::{repeat::TandemRepeat, utils::cigar_utils};
 /// to the next tandem repeat region.
 pub fn run(
     tr_regions: &mut [TandemRepeat],
-    partitions_map: &Arc<HashMap<usize, Array<f32, Dim<[usize; 2]>>>>,
+    partitions_map: &Arc<PartitionMap>,
     alignment: &str,
     reference: Option<&str>,
     flanksize: usize,
@@ -40,8 +39,8 @@ pub fn run(
 ) -> Result<()> {
     debug!("Launching thread {tidx}");
 
-    let (htsfile, idx, header) =
-        thread_setup(alignment, reference).with_context(|| format!("Error during setup on thread {tidx}"))?;
+    let (htsfile, idx, header) = thread_setup(alignment, reference)
+        .with_context(|| format!("Error during setup on thread {tidx}"))?;
 
     for tr_region in tr_regions {
         let fetch_request = tr_region.reference_info.get_fetch_definition_s();
@@ -203,16 +202,6 @@ fn allele_length_from_cigar(
     }
 
     Ok(tr_region_len)
-}
-
-pub fn make_partitions_map(copy_numbers: &[usize]) -> HashMap<usize, Array<f32, Dim<[usize; 2]>>> {
-    info!("Generating partitions for copy numbers {copy_numbers:?}");
-    let mut map: HashMap<usize, Array<f32, Dim<[usize; 2]>>> = HashMap::new();
-    for cn in copy_numbers {
-        map.insert(*cn, partitions(*cn));
-    }
-
-    map
 }
 
 #[cfg(test)]

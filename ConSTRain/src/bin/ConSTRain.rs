@@ -3,6 +3,7 @@ use clap::Parser;
 use constrain::{
     self,
     cli::{Cli, Commands},
+    genotyping,
     utils::io_utils,
 };
 use env_logger::{Builder, Env};
@@ -21,30 +22,20 @@ fn main() -> Result<()> {
 
     // parse tandem repeats from bed file and store observed copy numbers
     match config.command {
-        Commands::Alignment {
-            repeats,
-            alignment,
-            ploidy,
-            flanksize,
-            threads,
-            reads_per_allele,
-            sample: _,
-            reference,
-            cnvs,
-        } => {
+        Commands::Alignment(args) => {
             // read tandem repeats from bedfile. Copy numbers will be set based on `ploidy`, and
             // optionally updated from `cnvs`, if it was provided
             let (mut tr_regions, observed_copy_numbers) =
-                io_utils::parse_tandem_repeats(&repeats, &ploidy, cnvs.as_deref())?;
+                io_utils::parse_tandem_repeats(&args.repeats, &args.ploidy, args.cnvs.as_deref())?;
 
             // generate partitions relevant to genotyping tandem repeats with observed copy numbers
-            let partitions_map = Arc::new(constrain::make_partitions_map(&observed_copy_numbers));
+            let partitions_map = Arc::new(genotyping::make_partitions_map(&observed_copy_numbers));
 
-            debug!("Spawning {} threads", threads);
+            debug!("Spawning {} threads", args.threads);
             ThreadPoolBuilder::new()
-                .num_threads(threads)
+                .num_threads(args.threads)
                 .build_global()?;
-            let chunksize = tr_regions.len() / threads + 1;
+            let chunksize = tr_regions.len() / args.threads + 1;
 
             info!("Starting genotyping");
             tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
@@ -53,10 +44,10 @@ fn main() -> Result<()> {
                 constrain::run(
                     tr_regions,
                     &partitions_map,
-                    &alignment,
-                    reference.as_deref(),
-                    flanksize,
-                    reads_per_allele,
+                    &args.alignment,
+                    args.reference.as_deref(),
+                    args.flanksize,
+                    args.reads_per_allele,
                     tidx,
                 )
                 .expect("Error during genotyping");
@@ -64,7 +55,8 @@ fn main() -> Result<()> {
             info!("Finished genotyping");
 
             // get contig names and lengths, write variant calls to stdout
-            let (target_names, target_lengths) = io_utils::tnames_tlens_from_header(&alignment)?;
+            let (target_names, target_lengths) =
+                io_utils::tnames_tlens_from_header(&args.alignment)?;
             io_utils::trs_to_vcf(&tr_regions, &target_names, &target_lengths, &sample_name)?;
         }
         Commands::VCF {} => {
