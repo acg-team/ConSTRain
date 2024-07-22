@@ -5,6 +5,7 @@
 //! [Bioinformatics Centre](https://www.zhaw.ch/en/lsfm/institutes-centres/icls/bioinformatics/) at the Zürich University of Applied Sciences.
 pub mod cli;
 pub mod genotyping;
+pub mod io;
 pub mod repeat;
 pub mod rhtslib_reimplements;
 pub mod utils;
@@ -18,7 +19,7 @@ use rust_htslib::{
 };
 use std::{collections::HashMap, ffi, sync::Arc};
 
-use crate::{repeat::TandemRepeat, utils::cigar_utils};
+use crate::{repeat::TandemRepeat, utils::cigar};
 
 /// The main work of ConSTRain happens in this `run` function.
 /// It is meant to be called from inside a rayon parallel iterator.
@@ -87,7 +88,7 @@ fn thread_setup(
     let htsfile = rhtslib_reimplements::rhtslib_from_path(alignment_path)?;
     let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
     let c_str = ffi::CString::new(alignment_path)
-        .context("Internal 0 byte contained in alignment file name")?;
+        .context("Encountered internal 0 byte in alignment file name")?;
     let idx: *mut htslib::hts_idx_t = unsafe { htslib::sam_index_load(htsfile, c_str.as_ptr()) };
     assert!(!idx.is_null(), "Unable to load index for alignment file!");
 
@@ -176,8 +177,8 @@ fn allele_length_from_cigar(
 ) -> Result<i64> {
     let mut tr_region_len = 0;
     for op in cigar {
-        let consumes_r = cigar_utils::cigar_consumes_ref(op);
-        let advances_tr = cigar_utils::cigar_advances_tr_len(op);
+        let consumes_r = cigar::consumes_ref(op);
+        let advances_tr = cigar::advances_tr_len(op);
         // let len = op.len() as i64;
         let len = i64::from(op.len());
 

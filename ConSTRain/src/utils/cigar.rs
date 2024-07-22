@@ -6,7 +6,7 @@ use rust_htslib::bam::record::Cigar;
 
 /// Check if the provided cigar operation `cigar` advances the
 /// position in the reference sequence.
-pub fn cigar_consumes_ref(cigar: &Cigar) -> bool {
+pub fn consumes_ref(cigar: &Cigar) -> bool {
     matches!(
         cigar,
         Cigar::Match(_) | Cigar::Del(_) | Cigar::RefSkip(_) | Cigar::Equal(_) | Cigar::Diff(_)
@@ -15,7 +15,7 @@ pub fn cigar_consumes_ref(cigar: &Cigar) -> bool {
 
 /// Check if the provided cigar operation `cigar` advances the
 /// position in the query sequence.
-pub fn cigar_consumes_query(cigar: &Cigar) -> bool {
+pub fn consumes_query(cigar: &Cigar) -> bool {
     matches!(
         cigar,
         Cigar::Match(_) | Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::Equal(_) | Cigar::Diff(_)
@@ -25,7 +25,7 @@ pub fn cigar_consumes_query(cigar: &Cigar) -> bool {
 /// Used when in a TR region to see if the provided cigar operation
 /// `cigar` advances the TR length.
 /// (same as [`cigar_consumes_query`] but excluding the [`Cigar::SoftClip`] variant)
-pub fn cigar_advances_tr_len(cigar: &Cigar) -> bool {
+pub fn advances_tr_len(cigar: &Cigar) -> bool {
     matches!(
         cigar,
         Cigar::Match(_) | Cigar::Ins(_) | Cigar::Equal(_) | Cigar::Diff(_)

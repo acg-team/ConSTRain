@@ -3,8 +3,7 @@ use clap::Parser;
 use constrain::{
     self,
     cli::{Cli, Commands},
-    genotyping,
-    utils::io_utils,
+    genotyping, io, utils,
 };
 use env_logger::{Builder, Env};
 use log::{debug, info};
@@ -26,7 +25,7 @@ fn main() -> Result<()> {
             // read tandem repeats from bedfile. Copy numbers will be set based on `ploidy`, and
             // optionally updated from `cnvs`, if it was provided
             let (mut tr_regions, observed_copy_numbers) =
-                io_utils::parse_tandem_repeats(&args.repeats, &args.ploidy, args.cnvs.as_deref())?;
+                io::bed::parse_tandem_repeats(&args.repeats, &args.ploidy, args.cnvs.as_deref())?;
 
             // generate partitions relevant to genotyping tandem repeats with observed copy numbers
             let partitions_map = Arc::new(genotyping::make_partitions_map(&observed_copy_numbers));
@@ -55,11 +54,10 @@ fn main() -> Result<()> {
             info!("Finished genotyping");
 
             // get contig names and lengths, write variant calls to stdout
-            let (target_names, target_lengths) =
-                io_utils::tnames_tlens_from_header(&args.alignment)?;
-            io_utils::trs_to_vcf(&tr_regions, &target_names, &target_lengths, &sample_name)?;
+            let (target_names, target_lengths) = utils::tnames_tlens_from_header(&args.alignment)?;
+            io::vcf::write(&tr_regions, &target_names, &target_lengths, &sample_name)?;
         }
-        Commands::VCF {} => {
+        Commands::VCF(args) => {
             panic!("VCF subcommand is not implemented");
         }
     };

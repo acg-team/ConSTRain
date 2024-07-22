@@ -1,0 +1,210 @@
+use anyhow::{Context, Result};
+use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Read, Reader, Record, Writer};
+
+use crate::repeat::TandemRepeat;
+
+pub fn parse_tandem_repeats(
+    repeats: &str,
+    ploidy: &str,
+    cnvs: Option<&str>,
+) -> Result<Vec<TandemRepeat>> {
+    let tr_regions: Vec<TandemRepeat> = Vec::new();
+    let mut bcf = Reader::from_path(repeats).with_context(|| format!("Failed to open VCF file at {repeats}"))?;
+
+    for record in bcf.records() {
+        let record = record.with_context(|| format!("Error reading VCF record in file {repeats}"))?;
+        let mut s = String::new();
+        for allele in record.alleles() {
+            for c in allele {
+                s.push(char::from(*c))
+            }
+        }
+        println!("Locus: {}, Alleles: {s}", record.pos());
+    }
+
+    Ok(tr_regions)
+}
+
+/// Write (genotyped) tandem repeat regions to a vcf file.
+pub fn write(
+    tr_regions: &[TandemRepeat],
+    targets: &[String],
+    lengths: &[u64],
+    sample_name: &str,
+) -> Result<()> {
+    // Create header, write uncompressed VCF to stdout (header gets written when Writer is constructed)
+    let header = make_vcf_header(targets, lengths, sample_name);
+    let mut vcf = Writer::from_stdout(&header, true, Format::Vcf)?;
+
+    for tr_region in tr_regions {
+        // Create record for repeat and add reference information
+        let mut record = vcf.empty_record();
+        add_reference_info(&mut record, &vcf, tr_region)?;
+
+        // Using the estimated genotype for this locus, create the alleles and genotype string to add to the VCF
+        add_alleles_genotypes(&mut record, tr_region)?;
+
+        // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
+        add_additional_info(&mut record, tr_region)?;
+
+        // Write record
+        vcf.write(&record)?;
+    }
+
+    Ok(())
+}
+
+/// The VCF info lines to be included in the header. See [`make_vcf_header`].
+const VCF_INFO_LINES: &[&[u8]] = &[
+    br#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of reference allele">"#,
+    br#"##INFO=<ID=RU,Number=1,Type=String,Description="Repeat motif">"#,
+    br#"##INFO=<ID=PERIOD,Number=1,Type=Integer,Description="Repeat period (length of motif)">"#,
+    br#"##INFO=<ID=REF,Number=1,Type=Float,Description="Repeat allele length in reference">"#,
+];
+
+/// The VCF format lines to be included in the header. See [`make_vcf_header`].
+const VCF_FORMAT_LINES: &[&[u8]] = &[
+    br#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#,
+    br#"##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Copy number">"#,
+    br#"##FORMAT=<ID=FREQS,Number=1,Type=String,Description="Frequencies observed for each allele length. Keys are allele lengths and values are the number of reads with that allele length.">"#,
+    br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in number of copies of the repeat motif">"#,
+];
+
+/// Construct VCF a header. First, include information about the target contigs, followed by the [`VCF_INFO_LINES`] and [`VCF_FORMAT_LINES`].
+/// Then, write TR variant calls to stdout.
+fn make_vcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> Header {
+    let mut header = Header::new();
+
+    for (target, length) in targets.iter().zip(lengths.iter()) {
+        let header_contig_line = format!(r#"##contig=<ID={target},length={length}>"#);
+        header.push_record(header_contig_line.as_bytes());
+    }
+
+    for header_info_line in VCF_INFO_LINES {
+        header.push_record(header_info_line);
+    }
+    for header_format_line in VCF_FORMAT_LINES {
+        header.push_record(header_format_line);
+    }
+    header.push_sample(sample_name.as_bytes());
+
+    header
+}
+
+/// Add information about how the `tr_region` looks in the reference genome to the
+/// VCF `record`. We need the `vcf` struct to get the contig id from the VCF header.
+fn add_reference_info(record: &mut Record, vcf: &Writer, tr_region: &TandemRepeat) -> Result<()> {
+    let context = || {
+        format!(
+            "Error setting reference info for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    };
+
+    let rid = vcf
+        .header()
+        .name2rid(tr_region.reference_info.seqname.as_bytes())
+        .with_context(context)?;
+    let ref_len = tr_region.reference_info.get_reference_len() as usize;
+    record.set_rid(Some(rid));
+    record.set_pos(tr_region.reference_info.start);
+
+    record
+        .push_info_integer(b"END", &[tr_region.reference_info.end as i32])
+        .with_context(context)?;
+    record
+        .push_info_string(b"RU", &[tr_region.reference_info.unit.as_bytes()])
+        .with_context(context)?;
+    record
+        .push_info_integer(b"PERIOD", &[tr_region.reference_info.period as i32])
+        .with_context(context)?;
+    record
+        .push_info_integer(b"REF", &[ref_len as i32])
+        .with_context(context)?;
+
+    Ok(())
+}
+
+/// Add genotyping results stored on `tr_region` to the VCF `record`.
+fn add_alleles_genotypes(record: &mut Record, tr_region: &TandemRepeat) -> Result<()> {
+    let ref_len = tr_region.reference_info.get_reference_len() as usize;
+    let ref_allele = tr_region.reference_info.unit.repeat(ref_len);
+    let mut alleles = vec![ref_allele];
+    let mut genotype: Vec<GenotypeAllele> = Vec::new();
+
+    match &tr_region.genotype {
+        None => genotype.push(GenotypeAllele::UnphasedMissing), // No genotype estimated for repeat
+        Some(gts) => {
+            // gt has form &(allele_length: i64, n_times_estimated: f32)
+            for gt in gts {
+                let len = gt.0 as i32;
+                let n_estimated = gt.1 as i32;
+                if len == ref_len as i32 {
+                    // Reference allele always has to be first
+                    // Add this genotype as many times as it was estimated to be present
+                    for _ in 0..n_estimated {
+                        genotype.insert(0, GenotypeAllele::Unphased(0));
+                    }
+                    continue;
+                }
+                // Add this genotype as many times as it was estimated to be present
+                for _ in 0..n_estimated {
+                    genotype.push(GenotypeAllele::Unphased((alleles.len()) as i32));
+                }
+                let allele = tr_region.reference_info.unit.repeat(len as usize);
+                alleles.push(allele);
+            }
+        }
+    }
+
+    let alleles: Vec<&[u8]> = alleles.iter().map(std::string::String::as_bytes).collect();
+    record.set_alleles(&alleles).with_context(|| {
+        format!(
+            "Error setting alleles for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    })?;
+    record.push_genotypes(&genotype).with_context(|| {
+        format!(
+            "Error setting genotype for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    })?;
+    Ok(())
+}
+
+/// Add additional information stored on `tr_region` to the VCF `record`
+fn add_additional_info(record: &mut Record, tr_region: &TandemRepeat) -> Result<()> {
+    let context = || {
+        format!(
+            "Error setting format values for {}",
+            tr_region.reference_info.get_fetch_definition_s()
+        )
+    };
+    record
+        .push_format_integer(b"CN", &[tr_region.copy_number as i32])
+        .with_context(context)?;
+
+    let mut allele_freqs = tr_region.allele_freqs_as_tuples();
+    allele_freqs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let allele_freqs: Vec<String> = allele_freqs
+        .iter()
+        .map(|i| format!("{},{}", i.0, i.1))
+        .collect();
+    let allele_freqs = allele_freqs.join("|");
+    record
+        .push_format_string(b"FREQS", &[allele_freqs.as_bytes()])
+        .with_context(context)?;
+
+    let gt_as_allele_lens: Vec<String> = tr_region
+        .gt_as_allele_lengths()
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
+    let gt_as_allele_lens = gt_as_allele_lens.join(",");
+    record
+        .push_format_string(b"REPCN", &[gt_as_allele_lens.as_bytes()])
+        .with_context(context)?;
+
+    Ok(())
+}

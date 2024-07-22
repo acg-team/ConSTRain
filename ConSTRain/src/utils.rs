@@ -5,10 +5,12 @@
 //! the sub-modules contain functions related to specific functionality.
 use anyhow::{bail, Context, Result};
 use ndarray::prelude::*;
+use rust_htslib::{bam::HeaderView, htslib};
 use std::{cmp, path::Path};
 
-pub mod cigar_utils;
-pub mod io_utils;
+use crate::rhtslib_reimplements;
+
+pub mod cigar;
 
 /// Struct to represent Copy Number Variants
 #[derive(Debug, serde::Deserialize)]
@@ -91,6 +93,34 @@ pub fn zero_pad_if_shorter(
         }
         cmp::Ordering::Equal | cmp::Ordering::Greater => a,
     }
+}
+
+/// Extract all target names and their lengths from an alignment file's header.
+pub fn tnames_tlens_from_header(alignment_path: &str) -> Result<(Vec<String>, Vec<u64>)> {
+    let htsfile = rhtslib_reimplements::rhtslib_from_path(alignment_path)?;
+    let header: *mut htslib::sam_hdr_t = unsafe { htslib::sam_hdr_read(htsfile) };
+    let hview = HeaderView::new(header);
+    unsafe {
+        htslib::hts_close(htsfile);
+    }
+
+    let mut target_names = Vec::<String>::new();
+    let mut target_lengths = Vec::<u64>::new(); // tlens are u64 in rust_htslib
+
+    for target in &hview.target_names() {
+        let tid = hview
+            .tid(target)
+            .context("Could not get target ID from header")?;
+        let tlen = hview
+            .target_len(tid)
+            .context("Could not get target length from header")?;
+        let tname = std::str::from_utf8(target)?.to_owned();
+
+        target_lengths.push(tlen);
+        target_names.push(tname);
+    }
+
+    Ok((target_names, target_lengths))
 }
 
 /// Number of partitions that exist for integers 0 - 50 (see [https://oeis.org/A000041](https://oeis.org/A000041)).
