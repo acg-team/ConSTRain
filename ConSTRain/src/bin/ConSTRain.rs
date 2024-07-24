@@ -3,10 +3,12 @@ use clap::Parser;
 use constrain::{
     self,
     cli::{Cli, Commands},
-    genotyping, io, utils,
+    genotyping,
+    io::{self, InputFileType},
+    utils,
 };
 use env_logger::{Builder, Env};
-use log::{debug, info};
+use log::{debug, info, warn};
 use rayon::{prelude::*, ThreadPoolBuilder};
 use std::sync::Arc;
 
@@ -24,13 +26,18 @@ fn main() -> Result<()> {
         Commands::Alignment(args) => {
             // read tandem repeats from bedfile. Copy numbers will be set based on `ploidy`, and
             // optionally updated from `cnvs`, if it was provided
-            let (mut tr_regions, observed_copy_numbers) =
-                io::bed::parse_tandem_repeats(&args.repeats, &args.ploidy, args.cnvs.as_deref())?;
+            let (mut tr_regions, observed_copy_numbers) = io::parse_tandem_repeats(
+                InputFileType::Alignment(args.repeats.to_string()),
+                &args.ploidy,
+                args.max_cn,
+                args.cnvs.as_deref(),
+                args.sample.as_deref(),
+            )?;
 
             // generate partitions relevant to genotyping tandem repeats with observed copy numbers
             let partitions_map = Arc::new(genotyping::make_partitions_map(&observed_copy_numbers));
 
-            debug!("Spawning {} threads", args.threads);
+            debug!("Spawning {} thread(s) for genotyping", args.threads);
             ThreadPoolBuilder::new()
                 .num_threads(args.threads)
                 .build_global()?;
@@ -58,7 +65,35 @@ fn main() -> Result<()> {
             io::vcf::write(&tr_regions, &target_names, &target_lengths, &sample_name)?;
         }
         Commands::VCF(args) => {
-            panic!("VCF subcommand is not implemented");
+            warn!("VCF subcommand is experimental and should not be used yet");
+            let (mut tr_regions, observed_copy_numbers) = io::parse_tandem_repeats(
+                InputFileType::VCF(args.vcf.to_string()),
+                &args.ploidy,
+                args.max_cn,
+                args.cnvs.as_deref(),
+                Some(&args.sample),
+            )?;
+
+            // generate partitions relevant to genotyping tandem repeats with observed copy numbers
+            let partitions_map = Arc::new(genotyping::make_partitions_map(&observed_copy_numbers));
+
+            debug!("Spawning {} thread(s) for genotyping", args.threads);
+            ThreadPoolBuilder::new()
+                .num_threads(args.threads)
+                .build_global()?;
+            let chunksize = tr_regions.len() / args.threads + 1;
+
+            info!("Starting genotyping");
+            tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
+                // Main work happens in this parallel iterator
+                let tidx = rayon::current_thread_index().unwrap_or(0);
+                constrain::run_vcf(tr_regions, &partitions_map, args.reads_per_allele, tidx)
+                    .expect("Error during genotyping");
+            });
+
+            info!("Finished genotyping");
+
+            io::vcf::write_reuse_header(&tr_regions, &args.vcf)?;
         }
     };
 

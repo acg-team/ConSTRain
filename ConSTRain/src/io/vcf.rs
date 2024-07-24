@@ -1,28 +1,206 @@
-use anyhow::{Context, Result};
-use rust_htslib::bcf::{header::Header, record::GenotypeAllele, Format, Read, Reader, Record, Writer};
+use std::{
+    collections::{HashMap, HashSet},
+    str,
+};
 
-use crate::repeat::TandemRepeat;
+use anyhow::{bail, Context, Result};
+use log::info;
+use rust_htslib::bcf::{
+    header::{Header, HeaderView},
+    record::GenotypeAllele,
+    Format, Read, Reader, Record, Writer,
+};
 
-pub fn parse_tandem_repeats(
-    repeats: &str,
-    ploidy: &str,
-    cnvs: Option<&str>,
-) -> Result<Vec<TandemRepeat>> {
-    let tr_regions: Vec<TandemRepeat> = Vec::new();
-    let mut bcf = Reader::from_path(repeats).with_context(|| format!("Failed to open VCF file at {repeats}"))?;
+use crate::{
+    karyotype::Karyotype,
+    repeat::{RepeatReferenceInfo, TandemRepeat},
+};
+
+pub fn read_trs(
+    vcf_path: &str,
+    karyotype: &Karyotype,
+    tr_buffer: &mut Vec<TandemRepeat>,
+    observed_cn_buffer: &mut HashSet<usize>,
+    sample_name: &str,
+) -> Result<()> {
+    let mut bcf = Reader::from_path(vcf_path)
+        .with_context(|| format!("Failed to open VCF file at {vcf_path}"))?;
+
+    let header = bcf.header().to_owned();
+    let sample_idx = header
+        .sample_id(sample_name.as_bytes())
+        .with_context(|| format!("Sample {sample_name} was not found in vcf file at {vcf_path}"))?;
 
     for record in bcf.records() {
-        let record = record.with_context(|| format!("Error reading VCF record in file {repeats}"))?;
-        let mut s = String::new();
-        for allele in record.alleles() {
-            for c in allele {
-                s.push(char::from(*c))
-            }
-        }
-        println!("Locus: {}, Alleles: {s}", record.pos());
+        let record =
+            record.with_context(|| format!("Error reading VCF record in file {vcf_path}"))?;
+        let ref_info = ref_info_from_record(&record, &header)?;
+
+        // Get allele lengths from Record, parse into hashmap
+        let allele_freqs = allele_lens_from_record(&record, sample_idx)?;
+
+        // Get GT from Record, parse into vector
+        let genotype = genotype_from_record(&record, sample_idx)?;
+
+        let mut tr = TandemRepeat {
+            reference_info: ref_info,
+            copy_number: 0, // placeholder copy number value
+            allele_lengths: allele_freqs,
+            genotype: genotype,
+            skip: false,
+        };
+        tr.set_cn_from_karyotpe(karyotype);
+        observed_cn_buffer.insert(tr.copy_number);
+        tr_buffer.push(tr);
     }
 
-    Ok(tr_regions)
+    info!("Read {} TR regions from {vcf_path}", tr_buffer.len());
+    Ok(())
+}
+
+/// Is this really the way to get info fields from a record??? Seems incredibly tedious
+fn get_info_int(record: &Record, tag: &str) -> Result<i64> {
+    let res = record
+        .info(tag.as_bytes())
+        .integer()
+        .with_context(|| format!("Failed to parse info field '{tag}'"))?;
+
+    if let Some(res) = res {
+        Ok(res[0] as i64)
+    } else {
+        bail!("Info field '{tag}' was empty")
+    }
+}
+
+fn get_info_str(record: &Record, tag: &str) -> Result<String> {
+    let res = record
+        .info(tag.as_bytes())
+        .string()
+        .with_context(|| format!("Failed to parse info field '{tag}'"))?;
+
+    if let Some(res) = res {
+        let s = str::from_utf8(res[0]).context("Error parsing VCF string field")?;
+        Ok(s.to_string())
+    } else {
+        bail!("Info field '{tag}' was empty")
+    }
+}
+
+#[allow(dead_code)]
+fn get_format_int(record: &Record, tag: &str, sample_idx: usize) -> Result<Option<usize>> {
+    let res = record.format(tag.as_bytes()).integer();
+    if let Ok(res) = res {
+        let sample_val = res[sample_idx];
+
+        Ok(Some(sample_val[0] as usize))
+    } else {
+        Ok(None)
+    }
+}
+
+fn get_format_str(record: &Record, tag: &str, sample_idx: usize) -> Result<Option<String>> {
+    let res = record.format(tag.as_bytes()).string();
+
+    if let Ok(res) = res {
+        let sample_val = res[sample_idx];
+        let s = str::from_utf8(sample_val).context("Error parsing VCF string field")?;
+
+        Ok(Some(s.to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Might be defined on the RepeatReferenceInfo struct instead
+fn ref_info_from_record(record: &Record, header: &HeaderView) -> Result<RepeatReferenceInfo> {
+    let rid = record.rid().context("Failed to get record rid")?;
+    let contig = str::from_utf8(header.rid2name(rid)?)?.to_string();
+    let end = get_info_int(record, "END")?;
+    let period = get_info_int(record, "PERIOD")?;
+    let unit = get_info_str(record, "RU")?;
+
+    Ok(RepeatReferenceInfo {
+        seqname: contig,
+        start: record.pos() as i64,
+        end,
+        period,
+        unit,
+    })
+}
+
+fn allele_lens_from_record(
+    record: &Record,
+    sample_idx: usize,
+) -> Result<Option<HashMap<i64, f32>>> {
+    let allele_freqs = get_format_str(record, "FREQS", sample_idx)?;
+    if let Some(allele_freqs) = allele_freqs {
+        let allele_freqs: Vec<&str> = allele_freqs.split("|").collect();
+
+        let mut freq_map: HashMap<i64, f32> = HashMap::new();
+        for i in allele_freqs.iter() {
+            let split: Vec<&str> = i.split(",").collect();
+            if split.len() != 2 {
+                bail!("Encountered improperly formatted FREQS format field in VCF");
+            }
+            let allele_len = split[0].parse::<i64>()?;
+            let allele_freq = split[1].parse::<f32>()?;
+            freq_map.insert(allele_len, allele_freq);
+        }
+
+        Ok(Some(freq_map))
+    } else {
+        Ok(None)
+    }
+}
+
+fn genotype_from_record(record: &Record, sample_idx: usize) -> Result<Option<Vec<(i64, f32)>>> {
+    let allele_lengths = get_format_str(record, "REPCN", sample_idx)?;
+    if let Some(allele_lengths) = allele_lengths {
+        let allele_lengths: Vec<&str> = allele_lengths.split(",").collect();
+
+        let mut len_map: HashMap<i64, f32> = HashMap::new();
+        for i in allele_lengths.iter() {
+            let allele_len = i.parse::<i64>()?;
+            len_map
+                .entry(allele_len)
+                .and_modify(|counter| *counter += 1.0)
+                .or_insert(1.0);
+        }
+
+        let mut len_vec: Vec<(i64, f32)> = Vec::new();
+        for (k, v) in len_map.iter() {
+            len_vec.push((*k, *v));
+        }
+
+        Ok(Some(len_vec))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Write (genotyped) tandem repeat regions to a vcf file, reusing header from vcf file at `vcf_path`.
+pub fn write_reuse_header(tr_regions: &[TandemRepeat], vcf_path: &str) -> Result<()> {
+    let reader = Reader::from_path(vcf_path)
+        .with_context(|| format!("Failed to open VCF file at {vcf_path}"))?;
+    let header = Header::from_template(reader.header());
+    let mut vcf = Writer::from_stdout(&header, true, Format::Vcf)?;
+
+    for tr_region in tr_regions {
+        // Create record for repeat and add reference information
+        let mut record = vcf.empty_record();
+        add_reference_info(&mut record, &vcf, tr_region)?;
+
+        // Using the estimated genotype for this locus, create the alleles and genotype string to add to the VCF
+        add_alleles_genotypes(&mut record, tr_region)?;
+
+        // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
+        add_additional_info(&mut record, tr_region)?;
+
+        // Write record
+        vcf.write(&record)?;
+    }
+
+    Ok(())
 }
 
 /// Write (genotyped) tandem repeat regions to a vcf file.
@@ -135,7 +313,7 @@ fn add_alleles_genotypes(record: &mut Record, tr_region: &TandemRepeat) -> Resul
     match &tr_region.genotype {
         None => genotype.push(GenotypeAllele::UnphasedMissing), // No genotype estimated for repeat
         Some(gts) => {
-            // gt has form &(allele_length: i64, n_times_estimated: f32)
+            // gts has form &(allele_length: i64, n_times_estimated: f32)
             for gt in gts {
                 let len = gt.0 as i32;
                 let n_estimated = gt.1 as i32;

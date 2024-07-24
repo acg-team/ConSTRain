@@ -6,11 +6,13 @@
 //! copy number in a specific sample. It is also associated with a [`RepeatReferenceInfo`] struct,
 //! which encodes how a repetetive region looks in the reference genome.
 //! `ConSTRain` assumes that TRs are perfect tandem repetitions of a given nucleotide motif.
-use anyhow::Result;
-use ndarray::prelude::*;
 use std::collections::HashMap;
 
-use crate::utils::{self, CopyNumberVariant};
+use anyhow::Result;
+use log::debug;
+use ndarray::prelude::*;
+
+use crate::{cnv::CopyNumberVariant, karyotype::Karyotype, utils};
 
 /// `TandemRepeat` represents an observation of a tandem in an alignment.
 /// The representation of the locus in the reference genome is contained in `reference_info`. The
@@ -23,6 +25,7 @@ pub struct TandemRepeat {
     pub copy_number: usize,
     pub allele_lengths: Option<HashMap<i64, f32>>,
     pub genotype: Option<Vec<(i64, f32)>>,
+    pub skip: bool, // if false, do not estimate genotype for this TR
 }
 
 impl TandemRepeat {
@@ -39,13 +42,12 @@ impl TandemRepeat {
     /// If there is such an overlap: update `self.copy_number`.
     /// Assumes that all entries in `cnv_regions` are on the same contig as this tandem repeat.
     /// Furthermore, we assume that `cnv_regions` is coordinate sorted. **These assumptions
-    /// are not checked here. Improper input will likely result in the wrong copy number being
-    /// set!**
+    /// are not checked here. Improper input may result in the wrong copy number being set!**
     pub fn set_cn_from_cnvs(&mut self, cnv_regions: &[CopyNumberVariant]) -> Result<()> {
         let region_len = self.reference_info.end - self.reference_info.start;
         for cnv in cnv_regions {
-            if self.reference_info.start > cnv.end {
-                // The TR region lies beyond the current CNV on the contig. Since CNVs are coordinate
+            if cnv.start > self.reference_info.end {
+                // The current CNV region lies beyond the STR on the contig. Since CNVs are coordinate
                 // sorted, we can be confident that no other CNV overlaps the TR.
                 break;
             }
@@ -70,6 +72,18 @@ impl TandemRepeat {
             }
         }
         Ok(())
+    }
+    pub fn set_cn_from_karyotpe(&mut self, karyotype: &Karyotype) {
+        let cn = karyotype.get_ploidy(&self.reference_info.seqname);
+        if let Some(cn) = cn {
+            self.set_cn(cn);
+        } else {
+            debug!(
+                "Could not set copy number of {} from karyotype, skipping locus",
+                self.reference_info.get_fetch_definition_s()
+            );
+            self.skip = true;
+        }
     }
     pub fn allele_freqs_as_tuples(&self) -> Vec<(i64, f32)> {
         match &self.allele_lengths {

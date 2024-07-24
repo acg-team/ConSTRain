@@ -12,16 +12,6 @@ use crate::rhtslib_reimplements;
 
 pub mod cigar;
 
-/// Struct to represent Copy Number Variants
-#[derive(Debug, serde::Deserialize)]
-pub struct CopyNumberVariant {
-    pub seqname: String,
-    // CNV struct follows 0-based half-open coordinate system: [start, end)
-    pub start: i64,
-    pub end: i64,
-    pub cn: usize,
-}
-
 /// Determine the overlap between two ranges, each specified by their start
 /// and end coordinates.
 /// **NOTE:** start and end positions are inclusive

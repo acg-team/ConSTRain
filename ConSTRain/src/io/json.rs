@@ -1,6 +1,7 @@
 use std::{fs::File, io::BufReader};
 
 use anyhow::{Context, Result};
+use log::debug;
 use serde_json::Value;
 
 /// Read contig-level baseline copy number values from a json file at `path`.
@@ -18,4 +19,13 @@ pub fn ploidy_from_json(path: &str) -> Result<Value> {
     let result = serde_json::from_reader(reader)
         .with_context(|| format!("Could not deserialize json {path}"))?;
     Ok(result)
+}
+
+pub fn get_cn(ploidy: &Value, contig: &str) -> Option<usize> {
+    if let Some(val) = ploidy[contig].as_u64() {
+        Some(val as usize)
+    } else {
+        debug!("Contig for '{contig}' was not found in the ploidy json file.",);
+        None
+    }
 }

@@ -109,7 +109,7 @@ fn most_likely_partition_idx(
 pub type PartitionMap = HashMap<usize, Array<f32, Dim<[usize; 2]>>>;
 
 pub fn make_partitions_map(copy_numbers: &[usize]) -> PartitionMap {
-    info!("Generating partitions for copy numbers {copy_numbers:?}");
+    info!("Generating partitions for copy number(s) {copy_numbers:?}");
     let mut map: PartitionMap = HashMap::new();
     for cn in copy_numbers {
         map.insert(*cn, partitions(*cn));

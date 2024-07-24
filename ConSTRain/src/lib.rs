@@ -2,10 +2,13 @@
 //!
 //! This library serves as the backbone for the [ConSTRain binary](https://github.com/acg-team/ConSTRain),
 //! which is developed and maintained by the Applied Computational Genomics Team of the
-//! [Bioinformatics Centre](https://www.zhaw.ch/en/lsfm/institutes-centres/icls/bioinformatics/) at the Zürich University of Applied Sciences.
+//! [Bioinformatics Centre](https://www.zhaw.ch/en/lsfm/institutes-centres/icls/bioinformatics/)
+//! at the Zürich University of Applied Sciences, Switzerland.
 pub mod cli;
+pub mod cnv;
 pub mod genotyping;
 pub mod io;
+pub mod karyotype;
 pub mod repeat;
 pub mod rhtslib_reimplements;
 pub mod utils;
@@ -44,6 +47,10 @@ pub fn run(
         .with_context(|| format!("Error during setup on thread {tidx}"))?;
 
     for tr_region in tr_regions {
+        if tr_region.skip {
+            continue;
+        }
+
         let fetch_request = tr_region.reference_info.get_fetch_definition_s();
 
         let Ok(itr) =
@@ -54,7 +61,8 @@ pub fn run(
         };
 
         if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
-            trace!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
+            debug!("Thread {tidx}: Error extracting allele lengths for , skipping locus {fetch_request}: {e:?}");
+            tr_region.skip = true;
             // destroy iterator and continue to the next repeat region
             unsafe {
                 htslib::hts_itr_destroy(itr);
@@ -69,12 +77,39 @@ pub fn run(
         if let Err(e) =
             genotyping::estimate_genotype(tr_region, reads_per_allele, Arc::clone(partitions_map))
         {
-            trace!("Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}");
+            debug!("Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}");
             continue;
         }
     }
     unsafe {
         htslib::hts_close(htsfile);
+    }
+
+    debug!("Finished on thread {tidx}");
+    Ok(())
+}
+
+pub fn run_vcf(
+    tr_regions: &mut [TandemRepeat],
+    partitions_map: &Arc<PartitionMap>,
+    reads_per_allele: usize,
+    tidx: usize,
+) -> Result<()> {
+    debug!("Launching thread {tidx}");
+
+    for tr_region in tr_regions {
+        if tr_region.skip {
+            continue;
+        }
+        if let Err(e) =
+            genotyping::estimate_genotype(tr_region, reads_per_allele, Arc::clone(partitions_map))
+        {
+            debug!(
+                "Thread {tidx}: Could not estimate genotype for locus {}: {e:?}",
+                tr_region.reference_info.get_fetch_definition_s()
+            );
+            continue;
+        }
     }
 
     debug!("Finished on thread {tidx}");
@@ -125,13 +160,6 @@ pub fn extract_allele_lengths(
                 tr_region.reference_info.get_fetch_definition_s()
             )
         })?;
-        // if result.is_err() {
-        //     // error!(
-        //     //     "Faulty read for region {}",
-        //     //     tr_region.reference_info.get_fetch_definition_s()
-        //     // );
-        //     // continue;
-        // }
 
         if record.is_duplicate() || record.is_supplementary() || record.is_quality_check_failed() {
             // Ignore duplicate, supplementary, low quality reads
@@ -156,7 +184,7 @@ pub fn extract_allele_lengths(
             continue;
         }
         let tr_len = tr_region_len / tr_region.reference_info.period;
-        // TODO: Could try to do this directly on the TandemRepeat struct
+
         allele_lengths
             .entry(tr_len)
             .and_modify(|counter| *counter += 1.0)
@@ -176,6 +204,7 @@ fn allele_length_from_cigar(
     tr_end: i64,
 ) -> Result<i64> {
     let mut tr_region_len = 0;
+
     for op in cigar {
         let consumes_r = cigar::consumes_ref(op);
         let advances_tr = cigar::advances_tr_len(op);
