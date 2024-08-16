@@ -56,7 +56,7 @@ pub struct AlignmentArgs {
 
     /// File containing chromosome names and their base ploidies. Expected format is JSON
     #[arg(short, long)]
-    pub ploidy: String,
+    pub karyotype: String,
 
     /// Copy number variants for this individual. Expected format is BED3+1
     #[arg(long)]
@@ -95,7 +95,7 @@ pub struct VCFArgs {
 
     /// File containing chromosome names and their base ploidies. Expected format is JSON
     #[arg(short, long)]
-    pub ploidy: String,
+    pub karyotype: String,
 
     /// Sample name
     #[arg(short, long)]

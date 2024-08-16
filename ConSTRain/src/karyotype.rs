@@ -2,7 +2,7 @@ use anyhow::Result;
 use log::debug;
 use serde_json::Value;
 
-use crate::io::json::ploidy_from_json;
+use crate::io::json::read_karyotype;
 
 pub struct Karyotype {
     ploidies: Value,
@@ -11,7 +11,7 @@ pub struct Karyotype {
 impl Karyotype {
     pub fn from_json(path: &str) -> Result<Karyotype> {
         Ok(Karyotype {
-            ploidies: ploidy_from_json(path)?,
+            ploidies: read_karyotype(path)?,
         })
     }
     pub fn get_ploidy(&self, contig: &str) -> Option<usize> {

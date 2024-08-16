@@ -16,47 +16,57 @@ pub fn estimate_genotype(
     min_reads_per_allele: usize,
     partitions_map: Arc<PartitionMap>,
 ) -> Result<()> {
-    // Copy number for locus is 0, there is no need to estimate
     if tr_region.copy_number == 0 {
-        return Ok(());
+        bail!("cannot estimate genotype for locus with copy number 0");
     }
-    // If no reads were mapped to this locus, there is no need to estimate
     let Some(n_mapped_reads) = tr_region.get_n_mapped_reads() else {
-        return Ok(());
+        bail!("cannot estimate genotype for locus with no reads mapped");
     };
     if n_mapped_reads < min_reads_per_allele * tr_region.copy_number {
-        // Not enough reads were mapped to this locus, refuse to estimate
-        return Ok(());
+        bail!("not enough reads were mapped to locus");
     }
 
-    let (allele_lengths, mut counts) = tr_region.allele_freqs_as_ndarrays(Some("freq"));
-    // might need this error_constant at some point if trying to infer CN from read distribution
-    // let mut error_constant = 0.;
-    match counts.len().cmp(&tr_region.copy_number) {
-        Ordering::Less => counts = utils::zero_pad_if_shorter(counts, tr_region.copy_number),
+    let (allele_lengths, mut obs_distr) = tr_region.allele_freqs_as_ndarrays(Some("freq"));
+
+    let mut carry: Option<f32> = None;
+    match obs_distr.len().cmp(&tr_region.copy_number) {
+        Ordering::Less => obs_distr = utils::zero_pad_if_shorter(obs_distr, tr_region.copy_number),
         Ordering::Equal => (),
-        Ordering::Greater => counts = counts.slice_move(s![..tr_region.copy_number]), // and maybe set error_constant?
+        Ordering::Greater => {
+            carry = Some(obs_distr[tr_region.copy_number]); // keep track of this to check for edge cases later
+            obs_distr = obs_distr.slice_move(s![..tr_region.copy_number])
+        }
     };
 
-    let partitions = partitions_map
+    let possible_gts = partitions_map
         .get(&tr_region.copy_number)
         .with_context(|| {
             format!(
-                "Repeat {} has copy number {}, for which no partitions exist",
-                tr_region.reference_info.get_fetch_definition_s(),
+                "locus has copy number {}, for which no partitions exist",
                 tr_region.copy_number
             )
         })?;
 
-    let argmin =
-        most_likely_partition_idx(&partitions, n_mapped_reads, tr_region.copy_number, &counts)?;
-    let most_likely_partition = partitions.slice(s![argmin, ..]);
+    let argmin = most_likely_gt_idx(
+        &possible_gts,
+        n_mapped_reads,
+        tr_region.copy_number,
+        &obs_distr,
+    )?;
+    let most_likely_gt = possible_gts.slice(s![argmin, ..]);
 
     let mut genotype: Vec<(i64, f32)> = allele_lengths
         .iter()
-        .zip(most_likely_partition.iter())
+        .zip(most_likely_gt.iter())
         .filter_map(|(x, y)| if *y > 0. { Some((*x, *y)) } else { None })
         .collect();
+
+    if let Some(val) = carry {
+        if genotype.len() == tr_region.copy_number && obs_distr[tr_region.copy_number - 1] == val {
+            bail!("multiple allele distributions are equally likely");
+        }
+    }
+
     genotype.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     tr_region.genotype = Some(genotype);
 
@@ -64,20 +74,20 @@ pub fn estimate_genotype(
 }
 
 /// Return the indexes of the most likely genotype to underly the observed allele distribution
-fn most_likely_partition_idx(
-    partitions: &Array<f32, Dim<[usize; 2]>>,
+fn most_likely_gt_idx(
+    possible_gts: &Array<f32, Dim<[usize; 2]>>,
     n_mapped_reads: usize,
     copy_number: usize,
-    counts: &Array<f32, Dim<[usize; 1]>>,
+    obs_distr: &Array<f32, Dim<[usize; 1]>>,
 ) -> Result<usize> {
     // we assume each allele contributes the same number of reads to the observed
     // allele distribution. Thus, we find the expected number of reads per allele
     // by dividing the total number of mapped reads by the copy number
     let e_reads_per_allele = n_mapped_reads as f32 / copy_number as f32;
-    let mut errors = partitions.mapv(|a| a * e_reads_per_allele);
+    let mut errors = possible_gts.mapv(|a| a * e_reads_per_allele);
 
     // Manhattan distance between observed and expected allele distributions
-    errors = errors - counts.slice(s![..copy_number]);
+    errors = errors - obs_distr.slice(s![..copy_number]);
     errors.mapv_inplace(|x| x.abs());
     let error_sums = errors.sum_axis(Axis(1));
 
@@ -99,17 +109,17 @@ fn most_likely_partition_idx(
 
     match argmin.len().cmp(&1) {
         Ordering::Less => {
-            bail!("No most likely allele distribution was found. This should not happen")
+            bail!("no most likely allele distribution was found. This should not happen")
         }
         Ordering::Equal => Ok(argmin[0]),
-        Ordering::Greater => bail!("Multiple allele distributions are equally likely"),
+        Ordering::Greater => bail!("multiple allele distributions are equally likely"),
     }
 }
 
 pub type PartitionMap = HashMap<usize, Array<f32, Dim<[usize; 2]>>>;
 
 pub fn make_partitions_map(copy_numbers: &[usize]) -> PartitionMap {
-    info!("Generating partitions for copy number(s) {copy_numbers:?}");
+    info!("Generating possbile genotypes for copy number(s) {copy_numbers:?}");
     let mut map: PartitionMap = HashMap::new();
     for cn in copy_numbers {
         map.insert(*cn, partitions(*cn));
@@ -118,7 +128,7 @@ pub fn make_partitions_map(copy_numbers: &[usize]) -> PartitionMap {
     map
 }
 
-/// Generate all partitions of for integer 'n'
+/// Generate all integer partitions of for n
 ///
 /// Background: ([Wikipedia](https://en.wikipedia.org/wiki/Integer_partition), [Mathworld](https://mathworld.wolfram.com/Partition.html)).
 /// All partitions are padded with zeroes to be of size 'n', and values are represented by f32s (because the partitions will be used to calculate errors later.)
@@ -160,6 +170,8 @@ pub fn partitions(n: usize) -> Array<f32, Dim<[usize; 2]>> {
 
 #[cfg(test)]
 mod tests {
+    use crate::repeat::RepeatReferenceInfo;
+
     use super::*;
 
     #[test]
@@ -227,7 +239,7 @@ mod tests {
 
         assert_eq!(
             1,
-            most_likely_partition_idx(&partitions, n_reads, cn, &counts).unwrap()
+            most_likely_gt_idx(&partitions, n_reads, cn, &counts).unwrap()
         );
     }
 
@@ -237,9 +249,78 @@ mod tests {
         let cn = 2;
         let counts = arr1(&[3., 1.]);
         let n_reads = 4;
+        
+        assert!(most_likely_gt_idx(&partitions, n_reads, cn, &counts).is_err());
+    }
 
-        let res = most_likely_partition_idx(&partitions, n_reads, cn, &counts);
+    #[test]
+    fn estimate_gt_pass1() {
+        let ref_info = RepeatReferenceInfo {
+            seqname: String::from("chr1"),
+            start: 10,
+            end: 31,
+            period: 3,
+            unit: String::from("CAG"),
+        };
+        let allele_lengths = HashMap::from([(10, 12.), (12, 10.), (13, 9.), (14, 3.)]);
+        let mut tr = TandemRepeat {
+            reference_info: ref_info,
+            copy_number: 2,
+            allele_lengths: Some(allele_lengths),
+            genotype: None,
+            skip: false,
+        };
+        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+        let target_gt: Vec<(i64, f32)> = vec![(10, 1.), (12, 1.)];
 
-        assert!(res.is_err());
+        assert!(estimate_genotype(&mut tr, 0, Arc::clone(&pmap)).is_ok());
+        assert_eq!(tr.genotype, Some(target_gt));
+    }
+
+    #[test]
+    fn estimate_gt_pass2() {
+        let ref_info = RepeatReferenceInfo {
+            seqname: String::from("chr1"),
+            start: 10,
+            end: 31,
+            period: 3,
+            unit: String::from("CAG"),
+        };
+        let allele_lengths = HashMap::from([(10, 20.), (12, 4.), (13, 4.), (14, 3.)]);
+        let mut tr = TandemRepeat {
+            reference_info: ref_info,
+            copy_number: 2,
+            allele_lengths: Some(allele_lengths),
+            genotype: None,
+            skip: false,
+        };
+        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+        let target_gt: Vec<(i64, f32)> = vec![(10, 2.)];
+
+        assert!(estimate_genotype(&mut tr, 0, Arc::clone(&pmap)).is_ok());
+        assert_eq!(tr.genotype, Some(target_gt));
+    }
+
+    #[test]
+    fn estimate_gt_skip() {
+        let ref_info = RepeatReferenceInfo {
+            seqname: String::from("chr1"),
+            start: 10,
+            end: 31,
+            period: 3,
+            unit: String::from("CAG"),
+        };
+        let allele_lengths = HashMap::from([(10, 12.), (12, 10.), (13, 10.), (14, 3.)]);
+        let mut tr = TandemRepeat {
+            reference_info: ref_info,
+            copy_number: 2,
+            allele_lengths: Some(allele_lengths),
+            genotype: None,
+            skip: false,
+        };
+        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+
+        assert!(estimate_genotype(&mut tr, 0, Arc::clone(&pmap)).is_err());
+        assert_eq!(tr.genotype, None);
     }
 }

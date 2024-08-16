@@ -11,10 +11,9 @@ use crate::{
 };
 
 /// Read tandem repeat regions specified in the bed file at `bed_path` into `tr_buffer`.
-/// Copy numbers of tandem repeats are set based on the values specified in `ploidy_path`, which should be a
-/// json file mapping contig identifiers to copy number values. All copy number values that are observed while
-/// reading TR regions are added to `cn_buffer`, which is used later to generate partitions for only the
-/// relevant (i.e., observed) copy numbers.
+/// Copy numbers of tandem repeats are set based on the values specified in `karyotype`. All copy number
+/// values that are observed while reading TR regions are added to `observed_cn_buffer`, which is used later to
+/// generate partitions for only the relevant (i.e., observed) copy numbers.
 pub fn read_trs(
     bed_path: &str,
     karyotype: &Karyotype,

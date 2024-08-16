@@ -16,6 +16,10 @@ use crate::{
     repeat::{RepeatReferenceInfo, TandemRepeat},
 };
 
+/// Read tandem repeat regions specified in the vcf file at `vcf_path` into `tr_buffer`.
+/// Copy numbers of tandem repeats are set based on the values specified in `karyotype`. All copy number
+/// values that are observed while reading TR regions are added to `observed_cn_buffer`, which is used later to
+/// generate partitions for only the relevant (i.e., observed) copy numbers.
 pub fn read_trs(
     vcf_path: &str,
     karyotype: &Karyotype,

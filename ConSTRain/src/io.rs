@@ -15,16 +15,16 @@ pub enum InputFileType {
     VCF(String),
 }
 
-pub fn parse_tandem_repeats(
+pub fn load_tandem_repeats(
     repeats: InputFileType,
-    ploidy: &str,
+    karyotype: &str,
     max_cn: usize,
     cnvs: Option<&str>,
     sample: Option<&str>,
 ) -> Result<(Vec<TandemRepeat>, Vec<usize>)> {
     let mut observed_copy_numbers: HashSet<usize> = HashSet::new();
     let mut tr_regions: Vec<TandemRepeat> = Vec::new();
-    let karyotype = Karyotype::from_json(&ploidy)?;
+    let karyotype = Karyotype::from_json(&karyotype)?;
 
     #[allow(unreachable_patterns)]
     match repeats {
@@ -75,7 +75,7 @@ pub fn parse_tandem_repeats(
             if *x <= max_cn {
                 Some(*x)
             } else {
-                debug!("Copy number {x} is outside of the currently supported range of 1-{max_cn}, loci with this CN will not be genotyped");
+                debug!("Copy number {x} is higher than --max_cn {max_cn}, loci with this CN will not be genotyped");
                 None
             }
         })

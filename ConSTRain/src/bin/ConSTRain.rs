@@ -21,14 +21,13 @@ fn main() -> Result<()> {
     let sample_name = config.get_sample_name()?;
     debug!("Parsed command line");
 
-    // parse tandem repeats from bed file and store observed copy numbers
     match config.command {
         Commands::Alignment(args) => {
-            // read tandem repeats from bedfile. Copy numbers will be set based on `ploidy`, and
-            // optionally updated from `cnvs`, if it was provided
-            let (mut tr_regions, observed_copy_numbers) = io::parse_tandem_repeats(
+            // read tandem repeats from bedfile. Copy numbers will be set based on `karyotype` and
+            // optionally updated from `cnvs` if it was provided
+            let (mut tr_regions, observed_copy_numbers) = io::load_tandem_repeats(
                 InputFileType::Alignment(args.repeats.to_string()),
-                &args.ploidy,
+                &args.karyotype,
                 args.max_cn,
                 args.cnvs.as_deref(),
                 args.sample.as_deref(),
@@ -66,9 +65,9 @@ fn main() -> Result<()> {
         }
         Commands::VCF(args) => {
             warn!("VCF subcommand is experimental and should not be used yet");
-            let (mut tr_regions, observed_copy_numbers) = io::parse_tandem_repeats(
+            let (mut tr_regions, observed_copy_numbers) = io::load_tandem_repeats(
                 InputFileType::VCF(args.vcf.to_string()),
-                &args.ploidy,
+                &args.karyotype,
                 args.max_cn,
                 args.cnvs.as_deref(),
                 Some(&args.sample),
