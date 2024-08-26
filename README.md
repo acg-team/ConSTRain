@@ -7,8 +7,10 @@
 ```bash
 git clone https://github.com/acg-team/ConSTRain.git
 cd ConSTRain/ConSTRain
-cargo build --release
+cargo build --release --bin ConSTRain
 ```
+
+The binary will be created at `./target/release/ConSTRain`.
 
 ### Known issues
 #### libclang is not found
