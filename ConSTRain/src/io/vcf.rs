@@ -14,6 +14,7 @@ use rust_htslib::bcf::{
 use crate::{
     karyotype::Karyotype,
     repeat::{RepeatReferenceInfo, TandemRepeat},
+    utils::VcfFilter,
 };
 
 /// Read tandem repeat regions specified in the vcf file at `vcf_path` into `tr_buffer`.
@@ -44,14 +45,15 @@ pub fn read_trs(
         let allele_freqs = allele_lens_from_record(&record, sample_idx)?;
 
         // Get GT from Record, parse into vector
-        let genotype = genotype_from_record(&record, sample_idx)?;
+        // let genotype = genotype_from_record(&record, sample_idx)?;
+        let genotype = None;
 
         let mut tr = TandemRepeat {
             reference_info: ref_info,
             copy_number: 0, // placeholder copy number value
             allele_lengths: allele_freqs,
             genotype: genotype,
-            skip: false,
+            filter: VcfFilter::Pass,
         };
         tr.set_cn_from_karyotpe(karyotype);
         observed_cn_buffer.insert(tr.copy_number);
@@ -157,7 +159,7 @@ fn allele_lens_from_record(
     }
 }
 
-fn genotype_from_record(record: &Record, sample_idx: usize) -> Result<Option<Vec<(i64, f32)>>> {
+fn _genotype_from_record(record: &Record, sample_idx: usize) -> Result<Option<Vec<(i64, f32)>>> {
     let allele_lengths = get_format_str(record, "REPCN", sample_idx)?;
     if let Some(allele_lengths) = allele_lengths {
         let allele_lengths: Vec<&str> = allele_lengths.split(",").collect();
@@ -192,13 +194,16 @@ pub fn write_reuse_header(tr_regions: &[TandemRepeat], vcf_path: &str) -> Result
     for tr_region in tr_regions {
         // Create record for repeat and add reference information
         let mut record = vcf.empty_record();
-        add_reference_info(&mut record, &vcf, tr_region)?;
+        add_info_fields(&mut record, &vcf, tr_region)?;
 
         // Using the estimated genotype for this locus, create the alleles and genotype string to add to the VCF
         add_alleles_genotypes(&mut record, tr_region)?;
 
         // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
-        add_additional_info(&mut record, tr_region)?;
+        add_format_fields(&mut record, tr_region)?;
+
+        // If TR was filtered out, add reason why
+        // record.push_filter(tr_region.filter.name().as_bytes())?;
 
         // Write record
         vcf.write(&record)?;
@@ -221,13 +226,16 @@ pub fn write(
     for tr_region in tr_regions {
         // Create record for repeat and add reference information
         let mut record = vcf.empty_record();
-        add_reference_info(&mut record, &vcf, tr_region)?;
+        add_info_fields(&mut record, &vcf, tr_region)?;
 
         // Using the estimated genotype for this locus, create the alleles and genotype string to add to the VCF
         add_alleles_genotypes(&mut record, tr_region)?;
 
         // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
-        add_additional_info(&mut record, tr_region)?;
+        add_format_fields(&mut record, tr_region)?;
+
+        // If TR was filtered out, add reason why
+        record.push_filter(tr_region.filter.name().as_bytes())?;
 
         // Write record
         vcf.write(&record)?;
@@ -239,20 +247,33 @@ pub fn write(
 /// The VCF info lines to be included in the header. See [`make_vcf_header`].
 const VCF_INFO_LINES: &[&[u8]] = &[
     br#"##INFO=<ID=END,Number=1,Type=Integer,Description="End position of reference allele">"#,
-    br#"##INFO=<ID=RU,Number=1,Type=String,Description="Repeat motif">"#,
-    br#"##INFO=<ID=PERIOD,Number=1,Type=Integer,Description="Repeat period (length of motif)">"#,
+    br#"##INFO=<ID=RU,Number=1,Type=String,Description="Repeat unit">"#,
+    br#"##INFO=<ID=PERIOD,Number=1,Type=Integer,Description="Repeat period (length of unit)">"#,
     br#"##INFO=<ID=REF,Number=1,Type=Float,Description="Repeat allele length in reference">"#,
 ];
 
 /// The VCF format lines to be included in the header. See [`make_vcf_header`].
 const VCF_FORMAT_LINES: &[&[u8]] = &[
     br#"##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">"#,
+    br#"##FORMAT=<ID=FT,Number=1,Type=String,Description="Filter tag. Contains PASS if all filters passed, otherwise reason for filter">"#,
     br#"##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Copy number">"#,
+    br#"##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Number of fully spanning reads mapped to locus">"#,
     br#"##FORMAT=<ID=FREQS,Number=1,Type=String,Description="Frequencies observed for each allele length. Keys are allele lengths and values are the number of reads with that allele length.">"#,
-    br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in number of copies of the repeat motif">"#,
+    br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in the number of times the unit is repeated">"#,    
 ];
 
-/// Construct VCF a header. First, include information about the target contigs, followed by the [`VCF_INFO_LINES`] and [`VCF_FORMAT_LINES`].
+/// The VCF filter lines to be included in the header. See [`make_vcf_header`].
+const VCF_FILTER_LINES: &[&[u8]] = &[
+    br#"##FILTER=<ID=PASS,Description="All filters passed">"#,    
+    br#"##FILTER=<ID=Undefined,Description="Undefined ConSTRain filter">"#,
+    br#"##FILTER=<ID=InsReads,Description="Insufficient reads were mapped to the locus to estimate a genotype">"#,
+    br#"##FILTER=<ID=CnZero,Description="Can not estimate genotype for locus with copy number zero">"#,
+    br#"##FILTER=<ID=CnOor,Description="Copy number was out of range set for ConSTRain run (set via --max_cn)">"#,
+    br#"##FILTER=<ID=CnMissing,Description="No copy number set for locus. Can happen if contig is missing from karyotype or if only a part of the STR is affected by a CNA">"#,
+    br#"##FILTER=<ID=AmbGt,Description="Multiple genotypes are equally likely">"#,
+];
+
+/// Construct VCF a header. First, include information about the target contigs, followed by the [`VCF_INFO_LINES`], [`VCF_FORMAT_LINES`].
 /// Then, write TR variant calls to stdout.
 fn make_vcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> Header {
     let mut header = Header::new();
@@ -261,12 +282,14 @@ fn make_vcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> He
         let header_contig_line = format!(r#"##contig=<ID={target},length={length}>"#);
         header.push_record(header_contig_line.as_bytes());
     }
-
     for header_info_line in VCF_INFO_LINES {
         header.push_record(header_info_line);
     }
     for header_format_line in VCF_FORMAT_LINES {
         header.push_record(header_format_line);
+    }
+    for header_filter_line in VCF_FILTER_LINES {
+        header.push_record(header_filter_line);
     }
     header.push_sample(sample_name.as_bytes());
 
@@ -275,10 +298,10 @@ fn make_vcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> He
 
 /// Add information about how the `tr_region` looks in the reference genome to the
 /// VCF `record`. We need the `vcf` struct to get the contig id from the VCF header.
-fn add_reference_info(record: &mut Record, vcf: &Writer, tr_region: &TandemRepeat) -> Result<()> {
+fn add_info_fields(record: &mut Record, vcf: &Writer, tr_region: &TandemRepeat) -> Result<()> {
     let context = || {
         format!(
-            "Error setting reference info for {}",
+            "Error setting INFO field value for {}",
             tr_region.reference_info.get_fetch_definition_s()
         )
     };
@@ -355,17 +378,33 @@ fn add_alleles_genotypes(record: &mut Record, tr_region: &TandemRepeat) -> Resul
     Ok(())
 }
 
-/// Add additional information stored on `tr_region` to the VCF `record`
-fn add_additional_info(record: &mut Record, tr_region: &TandemRepeat) -> Result<()> {
+/// Add additional information stored on `tr_region` to the VCF `record` format fields
+fn add_format_fields(record: &mut Record, tr_region: &TandemRepeat) -> Result<()> {
     let context = || {
         format!(
-            "Error setting format values for {}",
+            "Error setting FORMAT field value for {}",
             tr_region.reference_info.get_fetch_definition_s()
         )
     };
+
     record
-        .push_format_integer(b"CN", &[tr_region.copy_number as i32])
+        .push_format_string(b"FT", &[tr_region.filter.name().as_bytes()])
         .with_context(context)?;
+    // if !matches!(tr_region.filter, VcfFilter::Pass) {
+    //     return Ok(())
+    // }
+
+    if !matches!(tr_region.filter, VcfFilter::CnMissing) {
+        record
+            .push_format_integer(b"CN", &[tr_region.copy_number as i32])
+            .with_context(context)?;
+    }
+    
+    if let Some(depth) = tr_region.get_n_mapped_reads() {
+        record.push_format_integer(b"DP", &[depth as i32]).with_context(context)?;
+    } else {
+        record.push_format_integer(b"DP", &[0]).with_context(context)?;
+    }
 
     let mut allele_freqs = tr_region.allele_freqs_as_tuples();
     allele_freqs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -386,7 +425,7 @@ fn add_additional_info(record: &mut Record, tr_region: &TandemRepeat) -> Result<
     let gt_as_allele_lens = gt_as_allele_lens.join(",");
     record
         .push_format_string(b"REPCN", &[gt_as_allele_lens.as_bytes()])
-        .with_context(context)?;
-
+        .with_context(context)?;    
+    
     Ok(())
 }

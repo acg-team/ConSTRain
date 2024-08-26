@@ -75,8 +75,8 @@ pub struct AlignmentArgs {
     pub flanksize: usize,
 
     /// Minimum number of reads per copy number to perform allele length estimation. E.g., `reads_per_allele` = 10 means at least 20 reads are needed for a locus with copynumber 2, 30 for copynumber 3 etc.
-    #[arg(long, default_value_t = 0)]
-    pub reads_per_allele: usize,
+    #[arg(long, default_value_t = 0.)]
+    pub reads_per_allele: f32,
 
     /// Maximum copy number to consider
     #[arg(long, default_value_t = 20)]
@@ -106,8 +106,8 @@ pub struct VCFArgs {
     pub cnvs: Option<String>,
 
     /// Minimum number of reads per copy number to perform allele length estimation. E.g., `reads_per_allele` = 10 means at least 20 reads are needed for a locus with copynumber 2, 30 for copynumber 3 etc.
-    #[arg(long, default_value_t = 0)]
-    pub reads_per_allele: usize,
+    #[arg(long, default_value_t = 0.)]
+    pub reads_per_allele: f32,
 
     /// Maximum copy number to consider
     #[arg(long, default_value_t = 20)]

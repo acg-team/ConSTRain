@@ -8,11 +8,14 @@
 //! `ConSTRain` assumes that TRs are perfect tandem repetitions of a given nucleotide motif.
 use std::collections::HashMap;
 
-use anyhow::Result;
 use log::debug;
 use ndarray::prelude::*;
 
-use crate::{cnv::CopyNumberVariant, karyotype::Karyotype, utils};
+use crate::{
+    cnv::CopyNumberVariant,
+    karyotype::Karyotype,
+    utils::{self, VcfFilter},
+};
 
 /// `TandemRepeat` represents an observation of a tandem in an alignment.
 /// The representation of the locus in the reference genome is contained in `reference_info`. The
@@ -25,7 +28,8 @@ pub struct TandemRepeat {
     pub copy_number: usize,
     pub allele_lengths: Option<HashMap<i64, f32>>,
     pub genotype: Option<Vec<(i64, f32)>>,
-    pub skip: bool, // if false, do not estimate genotype for this TR
+    // pub skip: bool, // if false, do not estimate genotype for this TR
+    pub filter: VcfFilter,
 }
 
 impl TandemRepeat {
@@ -43,7 +47,7 @@ impl TandemRepeat {
     /// Assumes that all entries in `cnv_regions` are on the same contig as this tandem repeat.
     /// Furthermore, we assume that `cnv_regions` is coordinate sorted. **These assumptions
     /// are not checked here. Improper input may result in the wrong copy number being set!**
-    pub fn set_cn_from_cnvs(&mut self, cnv_regions: &[CopyNumberVariant]) -> Result<()> {
+    pub fn set_cn_from_cnvs(&mut self, cnv_regions: &[CopyNumberVariant]) {
         let region_len = self.reference_info.end - self.reference_info.start;
         for cnv in cnv_regions {
             if cnv.start > self.reference_info.end {
@@ -52,26 +56,40 @@ impl TandemRepeat {
                 break;
             }
 
-            let overlap = utils::range_overlap(
+            let Ok(overlap) = utils::range_overlap(
                 self.reference_info.start,
                 self.reference_info.end - 1,
                 cnv.start,
                 cnv.end - 1,
-            )?;
+            ) else {
+                debug!(
+                    "Error calculating overlap between {} and {:?}",
+                    self.reference_info.get_fetch_definition_s(),
+                    cnv
+                );
+                continue;
+            };
 
             if overlap == region_len {
+                debug!(
+                    "Updating CN from {} to {} for {}",
+                    self.copy_number,
+                    cnv.cn,
+                    self.reference_info.get_fetch_definition_s()
+                );
                 self.set_cn(cnv.cn);
                 // TRs can intersect with at most one CNV, we found a hit so we can return
                 break;
             } else if overlap > 0 {
-                // TR partially overlaps CNV, impossible to set sensible CN for TR. Set to 0 so it gets skipped
-                // Should we return an Err here instead?
-                self.set_cn(0);
-                // TRs can intersect with at most one CNV, we found a (partial) hit so we can return
+                // TR partially overlaps CNA, impossible to set sensible CN for TR, so we update the filter type
+                debug!(
+                    "Locus {} only partially overlaps a CNA and will not be genotyped",
+                    self.reference_info.get_fetch_definition_s()
+                );
+                self.filter = VcfFilter::CnMissing;
                 break;
             }
         }
-        Ok(())
     }
     pub fn set_cn_from_karyotpe(&mut self, karyotype: &Karyotype) {
         let cn = karyotype.get_ploidy(&self.reference_info.seqname);
@@ -82,7 +100,7 @@ impl TandemRepeat {
                 "Could not set copy number of {} from karyotype, skipping locus",
                 self.reference_info.get_fetch_definition_s()
             );
-            self.skip = true;
+            self.filter = VcfFilter::CnMissing;
         }
     }
     pub fn allele_freqs_as_tuples(&self) -> Vec<(i64, f32)> {

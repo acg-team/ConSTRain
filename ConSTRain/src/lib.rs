@@ -21,6 +21,7 @@ use rust_htslib::{
     htslib::{self, htsFile},
 };
 use std::{collections::HashMap, ffi, sync::Arc};
+use utils::VcfFilter;
 
 use crate::{repeat::TandemRepeat, utils::cigar};
 
@@ -38,7 +39,7 @@ pub fn run(
     alignment: &str,
     reference: Option<&str>,
     flanksize: usize,
-    reads_per_allele: usize,
+    reads_per_allele: f32,
     tidx: usize,
 ) -> Result<()> {
     debug!("Launching thread {tidx}");
@@ -47,7 +48,7 @@ pub fn run(
         .with_context(|| format!("Error during setup on thread {tidx}"))?;
 
     for tr_region in tr_regions {
-        if tr_region.skip {
+        if !matches!(tr_region.filter, VcfFilter::Pass) {
             continue;
         }
 
@@ -62,7 +63,7 @@ pub fn run(
 
         if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
             debug!("Thread {tidx}: Error extracting allele lengths for , skipping locus {fetch_request}: {e:?}");
-            tr_region.skip = true;
+            tr_region.filter = VcfFilter::Undefined;
             // destroy iterator and continue to the next repeat region
             unsafe {
                 htslib::hts_itr_destroy(itr);
@@ -92,13 +93,13 @@ pub fn run(
 pub fn run_vcf(
     tr_regions: &mut [TandemRepeat],
     partitions_map: &Arc<PartitionMap>,
-    reads_per_allele: usize,
+    reads_per_allele: f32,
     tidx: usize,
 ) -> Result<()> {
     debug!("Launching thread {tidx}");
 
     for tr_region in tr_regions {
-        if tr_region.skip {
+        if !matches!(tr_region.filter, VcfFilter::Pass) {
             continue;
         }
         if let Err(e) =
@@ -208,7 +209,6 @@ fn allele_length_from_cigar(
     for op in cigar {
         let consumes_r = cigar::consumes_ref(op);
         let advances_tr = cigar::advances_tr_len(op);
-        // let len = op.len() as i64;
         let len = i64::from(op.len());
 
         if consumes_r && !advances_tr {

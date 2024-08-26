@@ -122,6 +122,33 @@ pub const N_PARTITIONS: &[usize] = &[
     173_525, 204_226,
 ];
 
+/// Supported filter tags. If more variants are added, 
+/// they should also be added to `VCF_FILTER_LINES` in [`crate::io::vcf`]
+#[derive(Debug)]
+pub enum VcfFilter {
+    Pass,
+    Undefined, // acts as a flag to skip locus without reporting reason in final VCF file
+    InsReads,
+    CnZero,
+    CnOor,
+    CnMissing,
+    AmbGt,
+}
+
+impl VcfFilter {
+    pub fn name(&self) -> &str {
+        match self {
+            VcfFilter::Pass => "PASS",
+            VcfFilter::Undefined => "Undefined",
+            VcfFilter::InsReads => "InsReads",
+            VcfFilter::CnZero => "CnZero",
+            VcfFilter::CnOor => "CnOor",
+            VcfFilter::CnMissing => "CnMissing",
+            VcfFilter::AmbGt => "AmbGt",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

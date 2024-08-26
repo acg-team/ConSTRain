@@ -56,14 +56,7 @@ pub fn load_tandem_repeats(
         let cnv_map = bed::read_cnvs(cnv_file, &mut observed_copy_numbers)?;
         for tr_region in &mut tr_regions {
             if let Some(cnv_vec) = cnv_map.get(&tr_region.reference_info.seqname) {
-                if let Err(_) = tr_region.set_cn_from_cnvs(cnv_vec) {
-                    debug!(
-                        "Could not set copy number of {} from CNV, skipping locus",
-                        tr_region.reference_info.get_fetch_definition_s()
-                    );
-                    tr_region.skip = true;
-                    continue;
-                };
+                tr_region.set_cn_from_cnvs(cnv_vec);
             };
         }
         info!("Updated TR copy numbers using CNVs");

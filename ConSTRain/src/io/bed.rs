@@ -8,6 +8,7 @@ use crate::{
     cnv::CopyNumberVariant,
     karyotype::Karyotype,
     repeat::{RepeatReferenceInfo, TandemRepeat},
+    utils::VcfFilter,
 };
 
 /// Read tandem repeat regions specified in the bed file at `bed_path` into `tr_buffer`.
@@ -35,7 +36,7 @@ pub fn read_trs(
             copy_number: 0, // placeholder copy number value
             allele_lengths: None,
             genotype: None,
-            skip: false,
+            filter: VcfFilter::Pass,
         };
 
         tr.set_cn_from_karyotpe(karyotype);
@@ -70,8 +71,10 @@ pub fn read_cnvs(
         n += 1;
         if let Some(cnv_vec) = cnv_map.get_mut(&cnv.seqname) {
             let prev_cnv = &cnv_vec[cnv_vec.len() - 1];
-            if prev_cnv.end > cnv.start && prev_cnv.seqname == cnv.seqname {
-                bail!("CNV file {cnv_path} is not coordinate sorted");
+            if cnv.start < prev_cnv.start {
+                bail!("CNAs in {cnv_path} are unsorted. Current: {cnv:?}, previous: {prev_cnv:?}");
+            } else if cnv.start < prev_cnv.end - 1 {
+                bail!("Overlapping CNAs in {cnv_path}. Encountered {cnv:?} and {prev_cnv:?}");
             }
             cnv_vec.push(cnv);
         } else {
