@@ -202,9 +202,6 @@ pub fn write_reuse_header(tr_regions: &[TandemRepeat], vcf_path: &str) -> Result
         // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
         add_format_fields(&mut record, tr_region)?;
 
-        // If TR was filtered out, add reason why
-        // record.push_filter(tr_region.filter.name().as_bytes())?;
-
         // Write record
         vcf.write(&record)?;
     }
@@ -233,9 +230,6 @@ pub fn write(
 
         // Add additional information that was extracted from the alignment to the VCF af FORMAT fields
         add_format_fields(&mut record, tr_region)?;
-
-        // If TR was filtered out, add reason why
-        record.push_filter(tr_region.filter.name().as_bytes())?;
 
         // Write record
         vcf.write(&record)?;
