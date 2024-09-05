@@ -15,7 +15,7 @@ pub mod utils;
 
 use anyhow::{Context, Result};
 use genotyping::PartitionMap;
-use log::{debug, trace};
+use log::debug;
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
     htslib::{self, htsFile},
@@ -57,12 +57,12 @@ pub fn run(
         let Ok(itr) =
             rhtslib_reimplements::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
         else {
-            trace!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
+            debug!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
             continue;
         };
 
         if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
-            debug!("Thread {tidx}: Error extracting allele lengths for , skipping locus {fetch_request}: {e:?}");
+            debug!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
             tr_region.filter = VcfFilter::Undefined;
             // destroy iterator and continue to the next repeat region
             unsafe {
