@@ -95,7 +95,7 @@ pub struct AlignmentArgs {
     #[arg(long, value_parser = norm_depth_in_range)]
     pub max_norm_depth: Option<f32>,
 
-    /// Minimum normalised depth of coverage to perform allele length estimation. E.g., `min-norm-depth` of 10. means at least 20 reads are needed for a locus with copy number 2, 30 for copy number 3 etc.
+    /// Minimum normalised depth of coverage to perform allele length estimation. E.g., `min-norm-depth` of 10. means at least 20 reads are needed for a locus with copy number 2, 30 for copy number 3 etc. (must be at least 1.)
     #[arg(long, default_value_t = 1., value_parser = norm_depth_in_range)]
     pub min_norm_depth: f32,    
 
@@ -138,7 +138,7 @@ pub struct VCFArgs {
     #[arg(long, value_parser = norm_depth_in_range)]
     pub max_norm_depth: Option<f32>,    
 
-    /// Minimum normalised depth of coverage to perform allele length estimation. E.g., `min-norm-depth` of 10. means at least 20 reads are needed for a locus with copy number 2, 30 for copy number 3 etc.
+    /// Minimum normalised depth of coverage to perform allele length estimation. E.g., `min-norm-depth` of 10. means at least 20 reads are needed for a locus with copy number 2, 30 for copy number 3 etc. (must be at least 1.)
     #[arg(long, default_value_t = 1., value_parser = norm_depth_in_range)]
     pub min_norm_depth: f32,
 
@@ -159,8 +159,8 @@ fn threads_in_range(s: &str) -> Result<usize> {
 
 fn norm_depth_in_range(s: &str) -> Result<f32> {
     let dp = s.parse::<f32>().context("Could not parse value passed to --max-norm-depth or --min-norm-depth")?;
-    if dp < 0. {
-        bail!("--max-norm-depth and --min-norm-depth must be positive")
+    if dp < 1. {
+        bail!("--max-norm-depth and --min-norm-depth must be at least 1.")
     }
     Ok(dp)
 }
