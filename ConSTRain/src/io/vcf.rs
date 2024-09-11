@@ -238,7 +238,7 @@ const VCF_FILTER_LINES: &[&[u8]] = &[
     br#"##FILTER=<ID=DPZERO,Description="No reads were mapped to locus">"#,
     br#"##FILTER=<ID=DPOOR,Description="Normalised depth of coverage at locus was out of range specified by --min-norm-depth and --max-norm-depth command line arguments">"#,
     br#"##FILTER=<ID=CNZERO,Description="Copy number was zero">"#,
-    br#"##FILTER=<ID=CNOOR,Description="Copy number was out of range set for ConSTRain run (set via --max_cn)">"#,
+    br#"##FILTER=<ID=CNOOR,Description="Copy number was out of range specified by --max-cn command line argument">"#,
     br#"##FILTER=<ID=CNMISSING,Description="No copy number set for locus. Can happen if contig is missing from karyotype or if only a part of the STR is affected by a CNA">"#,
     br#"##FILTER=<ID=AMBGT,Description="Multiple genotypes are equally likely">"#,
 ];
