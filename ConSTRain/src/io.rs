@@ -24,7 +24,7 @@ pub fn load_tandem_repeats(
 ) -> Result<(Vec<TandemRepeat>, Vec<usize>)> {
     let mut observed_copy_numbers: HashSet<usize> = HashSet::new();
     let mut tr_regions: Vec<TandemRepeat> = Vec::new();
-    let karyotype = Karyotype::from_json(&karyotype)?;
+    let karyotype = Karyotype::from_json(karyotype)?;
 
     #[allow(unreachable_patterns)]
     match repeats {
@@ -43,7 +43,7 @@ pub fn load_tandem_repeats(
                     &karyotype,
                     &mut tr_regions,
                     &mut observed_copy_numbers,
-                    &sample,
+                    sample,
                 )?;
             } else {
                 bail!("Sample name needs to be set to read repeats from VCF input");

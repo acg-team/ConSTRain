@@ -8,7 +8,7 @@ use constrain::{
     utils,
 };
 use env_logger::{Builder, Env};
-use log::{debug, info, warn};
+use log::{debug, info};
 use rayon::{prelude::*, ThreadPoolBuilder};
 use std::sync::Arc;
 
@@ -18,6 +18,7 @@ fn main() -> Result<()> {
 
     // parse command line and validate inputs where possible
     let config = Cli::parse();
+    config.validate()?;
     let sample_name = config.get_sample_name()?;
     debug!("Parsed command line");
 
@@ -52,7 +53,8 @@ fn main() -> Result<()> {
                     &args.alignment,
                     args.reference.as_deref(),
                     args.flanksize,
-                    args.reads_per_allele,
+                    args.min_norm_depth,
+                    args.max_norm_depth,
                     tidx,
                 )
                 .expect("Error during genotyping");
@@ -64,7 +66,6 @@ fn main() -> Result<()> {
             io::vcf::write(&tr_regions, &target_names, &target_lengths, &sample_name)?;
         }
         Commands::VCF(args) => {
-            warn!("VCF subcommand is experimental and should not be used yet");
             let (mut tr_regions, observed_copy_numbers) = io::load_tandem_repeats(
                 InputFileType::VCF(args.vcf.to_string()),
                 &args.karyotype,
@@ -86,7 +87,7 @@ fn main() -> Result<()> {
             tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
                 // Main work happens in this parallel iterator
                 let tidx = rayon::current_thread_index().unwrap_or(0);
-                constrain::run_vcf(tr_regions, &partitions_map, args.reads_per_allele, tidx)
+                constrain::run_vcf(tr_regions, &partitions_map, args.min_norm_depth, args.max_norm_depth, tidx)
                     .expect("Error during genotyping");
             });
 

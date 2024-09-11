@@ -149,6 +149,10 @@ impl TandemRepeat {
             .as_ref()
             .map(|allele_lengths| allele_lengths.values().sum::<f32>() as usize)
     }
+
+    pub fn get_norm_depth(&self) -> Option<f32> {
+        self.get_n_mapped_reads().map(|dp| dp as f32 / self.copy_number as f32)
+    }
 }
 
 /// `RepeatReferenceInfo` stores information encoding how a [`TandemRepeat`] is represented

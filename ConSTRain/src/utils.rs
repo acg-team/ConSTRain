@@ -127,8 +127,9 @@ pub const N_PARTITIONS: &[usize] = &[
 #[derive(Debug)]
 pub enum VcfFilter {
     Pass,
-    Undefined, // acts as a flag to skip locus without reporting reason in final VCF file
-    InsReads,
+    Undef, // acts as a flag to skip locus without reporting reason in final VCF file
+    DpZero,
+    DpOor,
     CnZero,
     CnOor,
     CnMissing,
@@ -139,12 +140,13 @@ impl VcfFilter {
     pub fn name(&self) -> &str {
         match self {
             VcfFilter::Pass => "PASS",
-            VcfFilter::Undefined => "Undefined",
-            VcfFilter::InsReads => "InsReads",
-            VcfFilter::CnZero => "CnZero",
-            VcfFilter::CnOor => "CnOor",
-            VcfFilter::CnMissing => "CnMissing",
-            VcfFilter::AmbGt => "AmbGt",
+            VcfFilter::Undef => "UNDEF",
+            VcfFilter::DpZero => "DPZERO",
+            VcfFilter::DpOor => "DPOOR",
+            VcfFilter::CnZero => "CNZERO",
+            VcfFilter::CnOor => "CNOOR",
+            VcfFilter::CnMissing => "CNMISSING",
+            VcfFilter::AmbGt => "AMBGT",
         }
     }
 }

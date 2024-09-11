@@ -15,7 +15,7 @@ pub mod utils;
 
 use anyhow::{Context, Result};
 use genotyping::PartitionMap;
-use log::debug;
+use log::{debug, trace};
 use rust_htslib::{
     bam::{ext::BamRecordExtensions, record::CigarStringView, Record},
     htslib::{self, htsFile},
@@ -39,10 +39,11 @@ pub fn run(
     alignment: &str,
     reference: Option<&str>,
     flanksize: usize,
-    reads_per_allele: f32,
+    min_norm_depth: f32,
+    max_norm_depth: Option<f32>,
     tidx: usize,
 ) -> Result<()> {
-    debug!("Launching thread {tidx}");
+    trace!("Launching thread {tidx}");
 
     let (htsfile, idx, header) = thread_setup(alignment, reference)
         .with_context(|| format!("Error during setup on thread {tidx}"))?;
@@ -57,13 +58,13 @@ pub fn run(
         let Ok(itr) =
             rhtslib_reimplements::rhtslib_fetch_by_str(idx, header, fetch_request.as_bytes())
         else {
-            debug!("Thread {tidx}: Error fetching reads, skipping locus {fetch_request}");
+            debug!("Error fetching reads, skipping locus {fetch_request}");
             continue;
         };
 
         if let Err(e) = extract_allele_lengths(tr_region, htsfile, itr, flanksize) {
-            debug!("Thread {tidx}: Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
-            tr_region.filter = VcfFilter::Undefined;
+            debug!("Error extracting allele lengths, skipping locus {fetch_request}: {e:?}");
+            tr_region.filter = VcfFilter::Undef;
             // destroy iterator and continue to the next repeat region
             unsafe {
                 htslib::hts_itr_destroy(itr);
@@ -76,9 +77,9 @@ pub fn run(
         }
 
         if let Err(e) =
-            genotyping::estimate_genotype(tr_region, reads_per_allele, Arc::clone(partitions_map))
+            genotyping::estimate_genotype(tr_region, min_norm_depth, max_norm_depth, Arc::clone(partitions_map))
         {
-            debug!("Thread {tidx}: Could not estimate genotype for locus {fetch_request}: {e:?}");
+            debug!("Could not estimate genotype for locus {fetch_request}: {e:?}");
             continue;
         }
     }
@@ -86,34 +87,35 @@ pub fn run(
         htslib::hts_close(htsfile);
     }
 
-    debug!("Finished on thread {tidx}");
+    trace!("Finished on thread {tidx}");
     Ok(())
 }
 
 pub fn run_vcf(
     tr_regions: &mut [TandemRepeat],
     partitions_map: &Arc<PartitionMap>,
-    reads_per_allele: f32,
+    min_norm_depth: f32,
+    max_norm_depth: Option<f32>,
     tidx: usize,
 ) -> Result<()> {
-    debug!("Launching thread {tidx}");
+    trace!("Launching thread {tidx}");
 
     for tr_region in tr_regions {
         if !matches!(tr_region.filter, VcfFilter::Pass) {
             continue;
         }
         if let Err(e) =
-            genotyping::estimate_genotype(tr_region, reads_per_allele, Arc::clone(partitions_map))
+            genotyping::estimate_genotype(tr_region, min_norm_depth, max_norm_depth, Arc::clone(partitions_map))
         {
             debug!(
-                "Thread {tidx}: Could not estimate genotype for locus {}: {e:?}",
+                "Could not estimate genotype for locus {}: {e:?}",
                 tr_region.reference_info.get_fetch_definition_s()
             );
             continue;
         }
     }
 
-    debug!("Finished on thread {tidx}");
+    trace!("Finished on thread {tidx}");
     Ok(())
 }
 

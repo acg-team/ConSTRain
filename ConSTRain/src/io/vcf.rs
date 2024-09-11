@@ -34,7 +34,7 @@ pub fn read_trs(
     let header = bcf.header().to_owned();
     let sample_idx = header
         .sample_id(sample_name.as_bytes())
-        .with_context(|| format!("Sample {sample_name} was not found in vcf file at {vcf_path}"))?;
+        .with_context(|| format!("Sample {sample_name} not found in file {vcf_path}"))?;
 
     for record in bcf.records() {
         let record =
@@ -127,7 +127,7 @@ fn ref_info_from_record(record: &Record, header: &HeaderView) -> Result<RepeatRe
 
     Ok(RepeatReferenceInfo {
         seqname: contig,
-        start: record.pos() as i64,
+        start: record.pos(),
         end,
         period,
         unit,
@@ -140,11 +140,11 @@ fn allele_lens_from_record(
 ) -> Result<Option<HashMap<i64, f32>>> {
     let allele_freqs = get_format_str(record, "FREQS", sample_idx)?;
     if let Some(allele_freqs) = allele_freqs {
-        let allele_freqs: Vec<&str> = allele_freqs.split("|").collect();
+        let allele_freqs: Vec<&str> = allele_freqs.split('|').collect();
 
         let mut freq_map: HashMap<i64, f32> = HashMap::new();
         for i in allele_freqs.iter() {
-            let split: Vec<&str> = i.split(",").collect();
+            let split: Vec<&str> = i.split(',').collect();
             if split.len() != 2 {
                 bail!("Encountered improperly formatted FREQS format field in VCF");
             }
@@ -159,32 +159,7 @@ fn allele_lens_from_record(
     }
 }
 
-fn _genotype_from_record(record: &Record, sample_idx: usize) -> Result<Option<Vec<(i64, f32)>>> {
-    let allele_lengths = get_format_str(record, "REPCN", sample_idx)?;
-    if let Some(allele_lengths) = allele_lengths {
-        let allele_lengths: Vec<&str> = allele_lengths.split(",").collect();
-
-        let mut len_map: HashMap<i64, f32> = HashMap::new();
-        for i in allele_lengths.iter() {
-            let allele_len = i.parse::<i64>()?;
-            len_map
-                .entry(allele_len)
-                .and_modify(|counter| *counter += 1.0)
-                .or_insert(1.0);
-        }
-
-        let mut len_vec: Vec<(i64, f32)> = Vec::new();
-        for (k, v) in len_map.iter() {
-            len_vec.push((*k, *v));
-        }
-
-        Ok(Some(len_vec))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Write (genotyped) tandem repeat regions to a vcf file, reusing header from vcf file at `vcf_path`.
+/// Write genotyped tandem repeat regions to a vcf file, reusing header from vcf file at `vcf_path`.
 pub fn write_reuse_header(tr_regions: &[TandemRepeat], vcf_path: &str) -> Result<()> {
     let reader = Reader::from_path(vcf_path)
         .with_context(|| format!("Failed to open VCF file at {vcf_path}"))?;
@@ -209,7 +184,7 @@ pub fn write_reuse_header(tr_regions: &[TandemRepeat], vcf_path: &str) -> Result
     Ok(())
 }
 
-/// Write (genotyped) tandem repeat regions to a vcf file.
+/// Write genotyped tandem repeat regions to a vcf file.
 pub fn write(
     tr_regions: &[TandemRepeat],
     targets: &[String],
@@ -253,18 +228,19 @@ const VCF_FORMAT_LINES: &[&[u8]] = &[
     br#"##FORMAT=<ID=CN,Number=1,Type=Integer,Description="Copy number">"#,
     br#"##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Number of fully spanning reads mapped to locus">"#,
     br#"##FORMAT=<ID=FREQS,Number=1,Type=String,Description="Frequencies observed for each allele length. Keys are allele lengths and values are the number of reads with that allele length.">"#,
-    br#"##FORMAT=<ID=REPCN,Number=1,Type=String,Description="Genotype given in the number of times the unit is repeated">"#,    
+    br#"##FORMAT=<ID=REPLEN,Number=1,Type=String,Description="Genotype given in the number of times the unit is repeated for each allele">"#,    
 ];
 
 /// The VCF filter lines to be included in the header. See [`make_vcf_header`].
 const VCF_FILTER_LINES: &[&[u8]] = &[
     br#"##FILTER=<ID=PASS,Description="All filters passed">"#,    
-    br#"##FILTER=<ID=Undefined,Description="Undefined ConSTRain filter">"#,
-    br#"##FILTER=<ID=InsReads,Description="Insufficient reads were mapped to the locus to estimate a genotype">"#,
-    br#"##FILTER=<ID=CnZero,Description="Can not estimate genotype for locus with copy number zero">"#,
-    br#"##FILTER=<ID=CnOor,Description="Copy number was out of range set for ConSTRain run (set via --max_cn)">"#,
-    br#"##FILTER=<ID=CnMissing,Description="No copy number set for locus. Can happen if contig is missing from karyotype or if only a part of the STR is affected by a CNA">"#,
-    br#"##FILTER=<ID=AmbGt,Description="Multiple genotypes are equally likely">"#,
+    br#"##FILTER=<ID=UNDEF,Description="Undefined ConSTRain filter">"#,
+    br#"##FILTER=<ID=DPZERO,Description="No reads were mapped to locus">"#,
+    br#"##FILTER=<ID=DPOOR,Description="Normalised depth of coverage at locus was out of range specified by --min-norm-depth and --max-norm-depth command line arguments">"#,
+    br#"##FILTER=<ID=CNZERO,Description="Copy number was zero">"#,
+    br#"##FILTER=<ID=CNOOR,Description="Copy number was out of range set for ConSTRain run (set via --max_cn)">"#,
+    br#"##FILTER=<ID=CNMISSING,Description="No copy number set for locus. Can happen if contig is missing from karyotype or if only a part of the STR is affected by a CNA">"#,
+    br#"##FILTER=<ID=AMBGT,Description="Multiple genotypes are equally likely">"#,
 ];
 
 /// Construct VCF a header. First, include information about the target contigs, followed by the [`VCF_INFO_LINES`], [`VCF_FORMAT_LINES`].
@@ -384,9 +360,6 @@ fn add_format_fields(record: &mut Record, tr_region: &TandemRepeat) -> Result<()
     record
         .push_format_string(b"FT", &[tr_region.filter.name().as_bytes()])
         .with_context(context)?;
-    // if !matches!(tr_region.filter, VcfFilter::Pass) {
-    //     return Ok(())
-    // }
 
     if !matches!(tr_region.filter, VcfFilter::CnMissing) {
         record
@@ -418,7 +391,7 @@ fn add_format_fields(record: &mut Record, tr_region: &TandemRepeat) -> Result<()
         .collect();
     let gt_as_allele_lens = gt_as_allele_lens.join(",");
     record
-        .push_format_string(b"REPCN", &[gt_as_allele_lens.as_bytes()])
+        .push_format_string(b"REPLEN", &[gt_as_allele_lens.as_bytes()])
         .with_context(context)?;    
     
     Ok(())
