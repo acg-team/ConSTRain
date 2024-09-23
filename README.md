@@ -2,6 +2,9 @@
 **Co**py **n**umber-guided **STR** **a**llele **in**ference
 
 ## Installation
+### Building from source
+In order to build ConSTRain from the source code, you will need to [install the Rust programming language](https://www.rust-lang.org/tools/install).
+Then, you can clone this repository and build ConSTRain as follows:
 
 ```bash
 git clone https://github.com/acg-team/ConSTRain.git

@@ -165,4 +165,14 @@ mod tests {
         let right = arr1(&[13., 12., 11.]);
         assert_eq!(left, zero_pad_if_shorter(right, 5));
     }
+    #[test]
+    fn overlap() {
+        let a = (2, 12);
+        let b = (4, 7);
+        // for 1-based closed-ended
+        assert_eq!(range_overlap(a.0, a.1, b.0, b.1).unwrap(), 4);
+
+        // for 0-based open-ended
+        assert_eq!(range_overlap(a.0, a.1 - 1, b.0, b.1 - 1).unwrap(), 3);
+    }
 }
