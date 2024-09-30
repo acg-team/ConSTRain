@@ -1,16 +1,17 @@
 # ConSTRain: copy number guided STR allele inference
 
+ConSTRain is a short tandem repeat (STR) variant caller that can account for copy number variants (CNVs), aneuploidies, and polyploid genomes.
+It is accurate and fast, needing less than 20 minutes to genotype >1.7 million STRs in a 100X alignment of human whole-genome sequencing reads on 32 threads.
+
 *   [Method overview](#method-overview)
 *   [Installation](#installation)
 *   [Running ConSTRain](#running-constrain)
 *   [Command line arguments](#command-line-arguments)
 *   [Input files and their formats](#input-file-formats)
 
-ConSTRain is a short tandem repeat (STR) variant caller that can account for copy number variants (CNVs), aneuploidies, and polyploid genomes.
-It is a very accurate and fast method, needing less than 20 minutes to genotype >1.7 million STRs in a 100X alignment of human whole-genome sequencing reads on 32 threads.
-To infer STR genotypes, ConSTRain generates all possible allele length distributions for each locus and returns the one that best matches the observed allele length distribution.
-
 ## Method overview
+To infer STR genotypes, ConSTRain generates all possible allele length distributions for each locus and returns the one that best matches the observed allele length distribution.
+An overview of how ConSTRain works internally is shown below.
 
 <img src="./images/method_overview.png" alt="method overview" width=1000 height="auto">
 
