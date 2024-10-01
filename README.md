@@ -70,7 +70,7 @@ Some basic ConSTRain invocations are shown here.
 For details on all command line arguments, run `ConSTRain --help` or go to the [command line arguments](#command-line-arguments) section below.
 
 Calling STR variants from aligned sequencing reads is done via the `ConSTRain alignment` subcommand.
-To run, `ConSTRain alignment` needs a BED file specifiying locations of STRs in the reference genome, a JSON file encoding the target chromosomes and their ploidies, and an alignment in SAM/BAM/CRAM format.
+To run, `ConSTRain alignment` needs at least a BED file specifiying locations of STRs in the reference genome, a JSON file encoding the target chromosomes and their ploidies, and an alignment in SAM/BAM/CRAM format.
 A basic `ConSTRain alignment` invocation looks like this:
 
 ```bash
