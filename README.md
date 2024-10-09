@@ -101,13 +101,13 @@ Running `ConSTRain vcf` is typically a matter of a few seconds.
 The basic invocation of `ConSTRain vcf` is:
 
 ```bash
-ConSTRain vcf -v <VCF> -k <KARYOTYPE> -r <REPEATS>
+ConSTRain vcf -v <VCF> -k <KARYOTYPE> -r <REPEATS> -s <SAMPLE>
 ```
 
 Again, you can add CNV information via the `--cnv` flag:
 
 ```bash
-ConSTRain vcf -v <VCF> -k <KARYOTYPE> -r <REPEATS> --cnvs <CNVs>
+ConSTRain vcf -v <VCF> -k <KARYOTYPE> -r <REPEATS> -s <SAMPLE> --cnvs <CNVs>
 ```
 
 ## Command line arguments
