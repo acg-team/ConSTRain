@@ -71,6 +71,7 @@ For details on all command line arguments, run `ConSTRain --help` or go to the [
 
 Calling STR variants from aligned sequencing reads is done via the `ConSTRain alignment` subcommand.
 To run, `ConSTRain alignment` needs a BED file specifiying locations of STRs in the reference genome, a JSON file encoding the target chromosomes and their ploidies, and an alignment in SAM/BAM/CRAM format.
+For some species, input files are provided in the [resources](./resources/) directory (currently, only *Homo sapiens* and *Musa acuminata*).
 A basic `ConSTRain alignment` invocation looks like this:
 
 ```bash
@@ -139,3 +140,4 @@ E.g., `{"chr1": 2, ... "chrX": 2, "chrY: 0"}` for a human female sample, `{"chr1
 It is critical that chromosome names in this file match chromosome names in the alignment file exactly.
 *   Repeats: the location of repeats in the reference genome should be provided as a BED3+2 file, with the two extra columns indicating the repeat unit length and the repeat unit.
 E.g., `chr5 21004   21014   2   AT` specifies a dinucleotide repeat with sequence `ATATATATAT` starting at position 21004 on chromosome 5.
+
