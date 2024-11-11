@@ -122,7 +122,7 @@ pub const N_PARTITIONS: &[usize] = &[
     173_525, 204_226,
 ];
 
-/// Supported filter tags. If more variants are added, 
+/// Supported filter tags. If more variants are added,
 /// they should also be added to `VCF_FILTER_LINES` in [`crate::io::vcf`]
 #[derive(Debug)]
 pub enum VcfFilter {

@@ -38,7 +38,7 @@ impl Cli {
                 }
                 Ok(())
             }
-        }   
+        }
     }
 
     pub fn get_sample_name(&self) -> Result<String> {
@@ -81,7 +81,7 @@ pub struct AlignmentArgs {
 
     /// Copy number variants for this individual. Expected format is BED3+1
     #[arg(long)]
-    pub cnvs: Option<String>,    
+    pub cnvs: Option<String>,
 
     /// Size of flanking region around the target repeat that reads need to cover to be considered (both sides)
     #[arg(long, default_value_t = 5)]
@@ -97,7 +97,7 @@ pub struct AlignmentArgs {
 
     /// Minimum normalised depth of coverage to perform allele length estimation. E.g., `min-norm-depth` of 10. means at least 20 reads are needed for a locus with copy number 2, 30 for copy number 3 etc. (must be at least 1.)
     #[arg(long, default_value_t = 1., value_parser = norm_depth_in_range)]
-    pub min_norm_depth: f32,    
+    pub min_norm_depth: f32,
 
     /// Reference genome. Expected format is FASTA (NOT gzipped), index file should exist right next to FASTA. Required if alignment is in CRAM format.
     #[arg(long)]
@@ -136,7 +136,7 @@ pub struct VCFArgs {
 
     /// Maximum normalised depth of coverage to perform allele length estimation. E.g., `max-norm-depth` of 30. means loci with more than 60 reads for a locus with copy number 2 will be skipped, 90 for copy number 3 etc. (not set by default)
     #[arg(long, value_parser = norm_depth_in_range)]
-    pub max_norm_depth: Option<f32>,    
+    pub max_norm_depth: Option<f32>,
 
     /// Minimum normalised depth of coverage to perform allele length estimation. E.g., `min-norm-depth` of 10. means at least 20 reads are needed for a locus with copy number 2, 30 for copy number 3 etc. (must be at least 1.)
     #[arg(long, default_value_t = 1., value_parser = norm_depth_in_range)]
@@ -158,7 +158,9 @@ fn threads_in_range(s: &str) -> Result<usize> {
 }
 
 fn norm_depth_in_range(s: &str) -> Result<f32> {
-    let dp = s.parse::<f32>().context("Could not parse value passed to --max-norm-depth or --min-norm-depth")?;
+    let dp = s
+        .parse::<f32>()
+        .context("Could not parse value passed to --max-norm-depth or --min-norm-depth")?;
     if dp < 1. {
         bail!("--max-norm-depth and --min-norm-depth must be at least 1.")
     }

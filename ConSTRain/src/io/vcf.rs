@@ -366,11 +366,15 @@ fn add_format_fields(record: &mut Record, tr_region: &TandemRepeat) -> Result<()
             .push_format_integer(b"CN", &[tr_region.copy_number as i32])
             .with_context(context)?;
     }
-    
+
     if let Some(depth) = tr_region.get_n_mapped_reads() {
-        record.push_format_integer(b"DP", &[depth as i32]).with_context(context)?;
+        record
+            .push_format_integer(b"DP", &[depth as i32])
+            .with_context(context)?;
     } else {
-        record.push_format_integer(b"DP", &[0]).with_context(context)?;
+        record
+            .push_format_integer(b"DP", &[0])
+            .with_context(context)?;
     }
 
     let mut allele_freqs = tr_region.allele_freqs_as_tuples();
@@ -392,7 +396,7 @@ fn add_format_fields(record: &mut Record, tr_region: &TandemRepeat) -> Result<()
     let gt_as_allele_lens = gt_as_allele_lens.join(",");
     record
         .push_format_string(b"REPLEN", &[gt_as_allele_lens.as_bytes()])
-        .with_context(context)?;    
-    
+        .with_context(context)?;
+
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! # Estimating genotypes from allele length distributions
 use anyhow::{bail, Context, Result};
 use log::info;
-use ndarray::prelude::*;
+use ndarray::{prelude::*, Slice};
 use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
 use crate::{
@@ -51,14 +51,16 @@ pub fn estimate_genotype(
     let Some(possible_gts) = partitions_map.get(&tr_region.copy_number) else {
         tr_region.filter = VcfFilter::CnOor;
         bail!(
-            "locus has copy number {}, for which no partitions exist",
+            "locus has copy number {}, for which no partitions were generated",
             tr_region.copy_number
         )
     };
 
     let min = match most_likely_gt_idx(
         possible_gts,
-        tr_region.get_n_mapped_reads().context("no reads were mapped to locus (should NOT be possible here)")?,
+        tr_region
+            .get_n_mapped_reads()
+            .context("no reads were mapped to locus (should NOT be possible here)")?,
         tr_region.copy_number,
         &obs_distr,
     ) {
@@ -70,6 +72,16 @@ pub fn estimate_genotype(
     };
 
     let most_likely_gt = possible_gts.slice(s![min, ..]);
+    // If there are any 'plateaus' in observed distribution, check that they all have the same allele frequency
+    if let Some(plateaus) = find_plateaus(&obs_distr) {
+        for p in plateaus {
+            let subarr = most_likely_gt.slice(s![p]);
+            if !subarr.slice(s![1..]).iter().all(|v| *v == subarr[0]) {
+                tr_region.filter = VcfFilter::AmbGt;
+                bail!("multiple allele distributions are equally likely");
+            }
+        }
+    }
     let mut genotype: Vec<(i64, f32)> = allele_lengths
         .iter()
         .zip(most_likely_gt.iter())
@@ -110,7 +122,7 @@ fn most_likely_gt_idx(
     // we can unwrap here: `min_by()` returns None if iterator is empty and we check earlier that it's not
     let min = *error_sums.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
 
-    let argmin: Vec<usize> = error_sums
+    let min: Vec<usize> = error_sums
         .iter()
         .enumerate()
         .filter_map(|(x, y)| {
@@ -123,13 +135,50 @@ fn most_likely_gt_idx(
         })
         .collect();
 
-    match argmin.len().cmp(&1) {
+    match min.len().cmp(&1) {
         Ordering::Less => {
             bail!("no most likely allele distribution was found. This should not happen")
         }
-        Ordering::Equal => Ok(argmin[0]),
+        Ordering::Equal => Ok(min[0]),
         Ordering::Greater => bail!("multiple allele distributions are equally likely"),
     }
+}
+
+/// Check if there are allele lengths in the observed allele length distribution
+/// that are represented by exactly the same number of reads. We call these 'plateaus'.
+/// Under ConSTRain's assumptions, all alleles in a plateau should have the
+/// same allele frequency in the final genotype.
+fn find_plateaus(arr: &Array<f32, Dim<[usize; 1]>>) -> Option<Vec<Slice>> {
+    let mut plateaus: Vec<Slice> = Vec::new();
+    let mut current: Option<(usize, usize)> = None;
+
+    for (i, val) in arr.slice(s![1..]).iter().enumerate() {
+        if arr[i] == *val {
+            if let Some(ref mut p) = current {
+                // extend the current plateau
+                p.1 += 1;
+            } else {
+                current = Some((i, i + 2));
+            }
+        } else {
+            if let Some(p) = current {
+                // reached end of plateau, push and reset
+                plateaus.push(Slice::new(p.0 as isize, Some(p.1 as isize), 1));
+                current = None;
+            }
+        }
+    }
+
+    if let Some(p) = current {
+        // if there was still a `current` at this point, we can slice to the end
+        plateaus.push(Slice::new(p.0 as isize, None, 1));
+    }
+
+    if plateaus.len() > 0 {
+        return Some(plateaus);
+    }
+
+    None
 }
 
 pub type PartitionMap = HashMap<usize, Array<f32, Dim<[usize; 2]>>>;
@@ -247,6 +296,30 @@ mod tests {
     }
 
     #[test]
+    fn plateaus() {
+        let arr = Array::from_vec(vec![48., 32., 32., 8., 4., 4., 4., 2., 2.]);
+        let expect = Some(vec![
+            Slice {
+                start: 1,
+                end: Some(3),
+                step: 1,
+            },
+            Slice {
+                start: 4,
+                end: Some(7),
+                step: 1,
+            },
+            Slice {
+                start: 7,
+                end: None,
+                step: 1,
+            },
+        ]);
+
+        assert_eq!(find_plateaus(&arr), expect);
+    }
+
+    #[test]
     fn most_likely_gt() {
         let partitions = arr2(&[[3., 0., 0.], [2., 1., 0.], [1., 1., 1.]]);
         let n_reads = 30;
@@ -282,6 +355,32 @@ mod tests {
         let mut tr = TandemRepeat {
             reference_info: ref_info,
             copy_number: 2,
+            allele_lengths: Some(allele_lengths),
+            genotype: None,
+            filter: utils::VcfFilter::Pass,
+        };
+        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+
+        assert!(estimate_genotype(&mut tr, 0., None, Arc::clone(&pmap)).is_err());
+        assert_eq!(tr.genotype, None);
+    }
+
+    #[test]
+    fn multiple_most_likely_gts3() {
+        // {12: 4, 13: 32, 14: 4}
+        // chr1_155186468
+        let ref_info = RepeatReferenceInfo {
+            seqname: String::from("chr1"),
+            start: 155186468,
+            end: 155186492,
+            period: 2,
+            unit: String::from("GT"),
+        };
+
+        let allele_lengths = HashMap::from([(12, 4.), (13, 32.), (14, 4.)]);
+        let mut tr = TandemRepeat {
+            reference_info: ref_info,
+            copy_number: 4,
             allele_lengths: Some(allele_lengths),
             genotype: None,
             filter: utils::VcfFilter::Pass,
@@ -338,5 +437,5 @@ mod tests {
 
         assert!(estimate_genotype(&mut tr, 0., None, Arc::clone(&pmap)).is_ok());
         assert_eq!(tr.genotype, Some(target_gt));
-    }    
+    }
 }

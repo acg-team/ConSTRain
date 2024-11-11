@@ -76,9 +76,12 @@ pub fn run(
             htslib::hts_itr_destroy(itr);
         }
 
-        if let Err(e) =
-            genotyping::estimate_genotype(tr_region, min_norm_depth, max_norm_depth, Arc::clone(partitions_map))
-        {
+        if let Err(e) = genotyping::estimate_genotype(
+            tr_region,
+            min_norm_depth,
+            max_norm_depth,
+            Arc::clone(partitions_map),
+        ) {
             debug!("Could not estimate genotype for locus {fetch_request}: {e:?}");
             continue;
         }
@@ -104,9 +107,12 @@ pub fn run_vcf(
         if !matches!(tr_region.filter, VcfFilter::Pass) {
             continue;
         }
-        if let Err(e) =
-            genotyping::estimate_genotype(tr_region, min_norm_depth, max_norm_depth, Arc::clone(partitions_map))
-        {
+        if let Err(e) = genotyping::estimate_genotype(
+            tr_region,
+            min_norm_depth,
+            max_norm_depth,
+            Arc::clone(partitions_map),
+        ) {
             debug!(
                 "Could not estimate genotype for locus {}: {e:?}",
                 tr_region.reference_info.get_fetch_definition_s()
