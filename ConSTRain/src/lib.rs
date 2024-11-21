@@ -76,11 +76,18 @@ pub fn run(
             htslib::hts_itr_destroy(itr);
         }
 
+        let pmap = Arc::clone(partitions_map); 
+        if let Err(e) = genotyping::tr_region_precheck(tr_region, min_norm_depth, max_norm_depth, &pmap) {
+            debug!(
+                "Locus {} failed precheck: {e:?}",
+                tr_region.reference_info.get_fetch_definition_s()
+            );
+            continue;
+        }
+
         if let Err(e) = genotyping::estimate_genotype(
             tr_region,
-            min_norm_depth,
-            max_norm_depth,
-            Arc::clone(partitions_map),
+            pmap.get(&tr_region.copy_number).unwrap(), // unwrap here because we check in `tr_region_precheck()` whether entry exists
         ) {
             debug!("Could not estimate genotype for locus {fetch_request}: {e:?}");
             continue;
@@ -107,11 +114,17 @@ pub fn run_vcf(
         if !matches!(tr_region.filter, VcfFilter::Pass) {
             continue;
         }
+        let pmap = Arc::clone(partitions_map);
+        if let Err(e) = genotyping::tr_region_precheck(tr_region, min_norm_depth, max_norm_depth, &pmap) {
+            debug!(
+                "Locus {} failed precheck: {e:?}",
+                tr_region.reference_info.get_fetch_definition_s()
+            );
+            continue;
+        }
         if let Err(e) = genotyping::estimate_genotype(
             tr_region,
-            min_norm_depth,
-            max_norm_depth,
-            Arc::clone(partitions_map),
+            pmap.get(&tr_region.copy_number).unwrap(), // unwrap here because we check in `tr_region_precheck()` whether entry exists
         ) {
             debug!(
                 "Could not estimate genotype for locus {}: {e:?}",

@@ -13,29 +13,8 @@ use crate::{
 /// observed allele distribution stored on the `tr_region` struct.
 pub fn estimate_genotype(
     tr_region: &mut TandemRepeat,
-    min_norm_depth: f32,
-    max_norm_depth: Option<f32>,
-    partitions_map: Arc<PartitionMap>,
+    possible_gts: &ArrayBase<ndarray::OwnedRepr<f32>, Dim<[usize; 2]>>,
 ) -> Result<()> {
-    if tr_region.copy_number == 0 {
-        tr_region.filter = VcfFilter::CnZero;
-        bail!("cannot estimate genotype for locus with copy number 0");
-    }
-    let Some(norm_depth) = tr_region.get_norm_depth() else {
-        tr_region.filter = VcfFilter::DpZero;
-        bail!("no reads were mapped to locus");
-    };
-    if norm_depth < min_norm_depth {
-        tr_region.filter = VcfFilter::DpOor;
-        bail!("locus normalised depth is too low");
-    }
-    if let Some(max_norm_depth) = max_norm_depth {
-        if norm_depth > max_norm_depth {
-            tr_region.filter = VcfFilter::DpOor;
-            bail!("locus normalised depth is too high");
-        }
-    }
-
     let (allele_lengths, mut obs_distr) = tr_region.allele_freqs_as_ndarrays(Some("freq"));
 
     let mut carry: Option<f32> = None;
@@ -46,14 +25,6 @@ pub fn estimate_genotype(
             carry = Some(obs_distr[tr_region.copy_number]); // keep track of this to check for edge cases later
             obs_distr = obs_distr.slice_move(s![..tr_region.copy_number])
         }
-    };
-
-    let Some(possible_gts) = partitions_map.get(&tr_region.copy_number) else {
-        tr_region.filter = VcfFilter::CnOor;
-        bail!(
-            "locus has copy number {}, for which no partitions were generated",
-            tr_region.copy_number
-        )
     };
 
     let min = match most_likely_gt_idx(
@@ -179,6 +150,38 @@ fn find_plateaus(arr: &Array<f32, Dim<[usize; 1]>>) -> Option<Vec<Slice>> {
     }
 
     None
+}
+
+/// A check to make sure whether it is possible to try and estimate a 
+/// genotype for the `TandemRepeat`, given some parameters.
+pub fn tr_region_precheck(tr_region: &mut TandemRepeat, min_norm_depth: f32, max_norm_depth: Option<f32>, pmap: &Arc<PartitionMap>,
+) -> Result<()> {
+    if tr_region.copy_number == 0 {
+        tr_region.filter = VcfFilter::CnZero;
+        bail!("cannot estimate genotype for locus with copy number 0");
+    }
+    let Some(norm_depth) = tr_region.get_norm_depth() else {
+        tr_region.filter = VcfFilter::DpZero;
+        bail!("no reads were mapped to locus");
+    };
+    if norm_depth < min_norm_depth {
+        tr_region.filter = VcfFilter::DpOor;
+        bail!("locus normalised depth is too low");
+    }
+    if let Some(max_norm_depth) = max_norm_depth {
+        if norm_depth > max_norm_depth {
+            tr_region.filter = VcfFilter::DpOor;
+            bail!("locus normalised depth is too high");
+        }
+    }
+    if let None = pmap.get(&tr_region.copy_number) {
+        tr_region.filter = VcfFilter::CnOor;
+        bail!(
+            "locus has copy number {}, for which no partitions were generated",
+            tr_region.copy_number
+        )
+    }
+    Ok(())
 }
 
 pub type PartitionMap = HashMap<usize, Array<f32, Dim<[usize; 2]>>>;
@@ -352,16 +355,17 @@ mod tests {
             unit: String::from("CAG"),
         };
         let allele_lengths = HashMap::from([(10, 12.), (12, 10.), (13, 10.), (14, 3.)]);
+        let cn = 2;
         let mut tr = TandemRepeat {
             reference_info: ref_info,
-            copy_number: 2,
+            copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
             filter: utils::VcfFilter::Pass,
         };
-        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+        let pmap = make_partitions_map(&vec![cn]);
 
-        assert!(estimate_genotype(&mut tr, 0., None, Arc::clone(&pmap)).is_err());
+        assert!(estimate_genotype(&mut tr, pmap.get(&cn).unwrap()).is_err());
         assert_eq!(tr.genotype, None);
     }
 
@@ -378,16 +382,17 @@ mod tests {
         };
 
         let allele_lengths = HashMap::from([(12, 4.), (13, 32.), (14, 4.)]);
+        let cn = 4;
         let mut tr = TandemRepeat {
             reference_info: ref_info,
-            copy_number: 4,
+            copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
             filter: utils::VcfFilter::Pass,
         };
-        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+        let pmap = make_partitions_map(&vec![cn]);
 
-        assert!(estimate_genotype(&mut tr, 0., None, Arc::clone(&pmap)).is_err());
+        assert!(estimate_genotype(&mut tr, pmap.get(&cn).unwrap()).is_err());
         assert_eq!(tr.genotype, None);
     }
 
@@ -401,17 +406,18 @@ mod tests {
             unit: String::from("CAG"),
         };
         let allele_lengths = HashMap::from([(10, 12.), (12, 10.), (13, 9.), (14, 3.)]);
+        let cn = 2;
         let mut tr = TandemRepeat {
             reference_info: ref_info,
-            copy_number: 2,
+            copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
             filter: utils::VcfFilter::Pass,
         };
-        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+        let pmap = make_partitions_map(&vec![cn]);
         let target_gt: Vec<(i64, f32)> = vec![(10, 1.), (12, 1.)];
 
-        assert!(estimate_genotype(&mut tr, 0., None, Arc::clone(&pmap)).is_ok());
+        assert!(estimate_genotype(&mut tr, pmap.get(&cn).unwrap()).is_ok());
         assert_eq!(tr.genotype, Some(target_gt));
     }
 
@@ -425,17 +431,18 @@ mod tests {
             unit: String::from("CAG"),
         };
         let allele_lengths = HashMap::from([(10, 20.), (12, 4.), (13, 4.), (14, 3.)]);
+        let cn = 2;
         let mut tr = TandemRepeat {
             reference_info: ref_info,
-            copy_number: 2,
+            copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
             filter: utils::VcfFilter::Pass,
         };
-        let pmap = Arc::new(make_partitions_map(&vec![tr.copy_number]));
+        let pmap = make_partitions_map(&vec![cn]);
         let target_gt: Vec<(i64, f32)> = vec![(10, 2.)];
 
-        assert!(estimate_genotype(&mut tr, 0., None, Arc::clone(&pmap)).is_ok());
+        assert!(estimate_genotype(&mut tr, pmap.get(&cn).unwrap()).is_ok());
         assert_eq!(tr.genotype, Some(target_gt));
     }
 }
