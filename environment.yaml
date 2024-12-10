@@ -1,0 +1,11 @@
+name: ConSTRain-analyses
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - cyvcf2
+  - matplotlib
+  - numpy
+  - pandas
+  - seaborn
