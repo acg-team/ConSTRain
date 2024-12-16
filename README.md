@@ -9,6 +9,8 @@ It is accurate and fast, needing less than 20 minutes to genotype >1.7 million S
 *   [Command line arguments](#command-line-arguments)
 *   [Input files and their formats](#input-file-formats)
 
+In case you encounter any problems with ConSTRain or have a question, feel free to open an issue or send an email to max.verbiest@zhaw.ch.
+
 ## Method overview
 To infer STR genotypes, ConSTRain generates all possible allele length distributions for each locus and returns the one that best matches the observed allele length distribution.
 An overview of how ConSTRain works internally is shown below.
