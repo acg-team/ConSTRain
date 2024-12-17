@@ -6,8 +6,9 @@ It is accurate and fast, needing less than 20 minutes to genotype >1.7 million S
 *   [Method overview](#method-overview)
 *   [Installation](#installation)
 *   [Running ConSTRain](#running-constrain)
-*   [Command line arguments](#command-line-arguments)
 *   [Input files and their formats](#input-file-formats)
+*   [Command line arguments](#command-line-arguments)
+*   [INFO and FORMAT fields](#constrain-info-and-format-fields)
 
 In case you encounter any problems with ConSTRain or have a question, feel free to open an issue or send an email to max.verbiest@zhaw.ch.
 
@@ -117,6 +118,18 @@ Again, you can add CNV information via the `--cnv` flag:
 ConSTRain vcf -v <VCF> -k <KARYOTYPE> -r <REPEATS> -s <SAMPLE> --cnvs <CNVs>
 ```
 
+## Input file formats
+ConSTRain expects alignments to adhere to [file specifications](https://samtools.github.io/hts-specs/) maintained by the GA4GH, and outputs variant calls in VCF format.
+However, specific formats are expected for other input files, which are outlined here. 
+
+*   Copy number variants: CNVs can be specified as a BED3+1 file, with the extra column indicating the (absolute!) copy number of the region affected by the CNV.
+E.g., `chr5 106680   106750   3`.
+*   Karyotype: the organism's karyotype should be specified as a JSON file mapping the names of chromosomes to their ploidies.
+E.g., `{"chr1": 2, ... "chrX": 2, "chrY: 0"}` for a human female sample, `{"chr1": 2, ... "chrX": 1, "chrY: 1"}` for a human male.
+It is critical that chromosome names in this file match chromosome names in the alignment file exactly.
+*   Repeats: the location of repeats in the reference genome should be provided as a BED3+2 file, with the two extra columns indicating the repeat unit length and the repeat unit.
+E.g., `chr5 21004   21014   2   AT` specifies a dinucleotide repeat with sequence `ATATATATAT` starting at position 21004 on chromosome 5.
+
 ## Command line arguments
 All of ConSTRain's command line arguments are listed here.
 For details on expected formats of the CNV, karyotype, and repeat file, see the section on [input file formats](#input-file-formats) below.
@@ -136,15 +149,38 @@ For details on expected formats of the CNV, karyotype, and repeat file, see the 
 | --threads        |       | both       | y             | 1                    | Number of threads to use                                                                                                                                                                                                   |
 | --vcf            | -v    | vcf        | y             |                      | Input file to extract repeat allele lengths from (VCF)                                                                                                                                                                     |
 
-## Input file formats
-ConSTRain expects alignments to adhere to [file specifications](https://samtools.github.io/hts-specs/) maintained by the GA4GH, and outputs variant calls in VCF format.
-However, specific formats are expected for other input files, which are outlined here. 
+## ConSTRain INFO and FORMAT fields
+ConSTRain provides several INFO and FORMAT fields in its VCF output to describe repeat loci and genotyping results.
 
-*   Copy number variants: CNVs can be specified as a BED3+1 file, with the extra column indicating the (absolute!) copy number of the region affected by the CNV.
-E.g., `chr5 106680   106750   3`.
-*   Karyotype: the organism's karyotype should be specified as a JSON file mapping the names of chromosomes to their ploidies.
-E.g., `{"chr1": 2, ... "chrX": 2, "chrY: 0"}` for a human female sample, `{"chr1": 2, ... "chrX": 1, "chrY: 1"}` for a human male.
-It is critical that chromosome names in this file match chromosome names in the alignment file exactly.
-*   Repeats: the location of repeats in the reference genome should be provided as a BED3+2 file, with the two extra columns indicating the repeat unit length and the repeat unit.
-E.g., `chr5 21004   21014   2   AT` specifies a dinucleotide repeat with sequence `ATATATATAT` starting at position 21004 on chromosome 5.
+### INFO fields
+| **INFO field** | **Description**                   |
+|----------------|-----------------------------------|
+| END            | End position of reference allele  |
+| RU             | Repeat unit                       |
+| PERIOD         | Repeat period (length of unit)    |
+| REF            | Repeat allele length in reference |
 
+### FORMAT fields
+| **FORMAT field** | **Description**                                                                                                                  |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| GT               | Genotype                                                                                                                         |
+| FT               | Filter tag. Contains PASS if all filters passed, otherwise reason for filter                                                     |
+| CN               | Copy number                                                                                                                      |
+| DP               | Number of fully spanning reads mapped to locus                                                                                   |
+| FREQS            | Frequencies observed for each allele length. Keys are allele lengths and values are the number of reads with that allele length  |
+| REPLEN           | Genotype given in the number of times the unit is repeated for each allele                                                       |
+
+### Filter tags
+The FT FORMAT field may hold different values.
+An overview of the meaning of different FT values is given here:
+
+| **FT value** | **Description**                                                                                                                  |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------|
+| PASS         | All filters passed                                                                                                               |
+| UNDEF        | Undefined ConSTRain filter                                                                                                       |
+| DPZERO       | No reads were mapped to locus                                                                                                    |
+| DPOOR        | Normalised depth of coverage at locus was out of range specified by --min-norm-depth and --max-norm-depth command line arguments |
+| CNZERO       | Copy number was zero                                                                                                             |
+| CNOOR        | Copy number was out of range specified by --max-cn command line argument                                                         |
+| CNMISSING    | No copy number set for locus. Can happen if contig is missing from karyotype or if only a part of the STR is affected by a CNA   |
+| AMBGT        | Multiple genotypes are equally likely                                                                                            |
