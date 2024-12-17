@@ -36,7 +36,7 @@ The inferred genotype of the STR locus in this example consists of an allele of 
 ### Using the pre-compiled binaries
 ConSTRain releases ship with pre-compiled binaries for MacOS (Intel) and x86_64 Linux.
 You can find them [here](https://github.com/acg-team/ConSTRain/releases).
-Please alert us of any issues or if you'd like us to include pre-compiled binaries for other targets.
+Please notify us of any issues or if you'd like us to include pre-compiled binaries for other targets.
 
 ### Building from source
 In order to build ConSTRain from the source code, you will need to [install the Rust programming language](https://www.rust-lang.org/tools/install).
