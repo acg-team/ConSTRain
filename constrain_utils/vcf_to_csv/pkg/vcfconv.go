@@ -1,9 +1,12 @@
 package vcfconv
 
 import (
+	"bufio"
+	"compress/gzip"
 	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -16,11 +19,13 @@ import (
 )
 
 func RunFiles(vcfPath string, csvPath string) {
-	vcfFile, csvFile := initFiles(vcfPath, csvPath)
-	defer vcfFile.Close()
+	vcfReadCloser, csvFile := initFiles(vcfPath, csvPath)
+	defer vcfReadCloser.Close()
 	defer csvFile.Close()
 
-	vcfReader, err := vcfgo.NewReader(vcfFile, false)
+	fmt.Println("Writing variants from", vcfPath, "to", csvPath)
+
+	vcfReader, err := vcfgo.NewReader(vcfReadCloser, false)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -46,16 +51,18 @@ func RunDirs(vcfDir string, csvDir string) {
 			defer wg.Done()
 
 			vcfPath := &vcfPaths[i]
-			vcfFile, csvFile := initFiles(*vcfPath, csvPath)
-			defer vcfFile.Close()
+			vcfReadCloser, csvFile := initFiles(*vcfPath, csvPath)
+			defer vcfReadCloser.Close()
 			defer csvFile.Close()
 
 			fmt.Println("Writing variants from", *vcfPath, "to", csvPath)
 
-			vcfReader, err := vcfgo.NewReader(vcfFile, false)
+			vcfReader, err := vcfgo.NewReader(vcfReadCloser, false)
 			if err != nil {
 				log.Fatal(err)
 			}
+			defer vcfReader.Close()
+
 			csvWriter := csv.NewWriter(csvFile)
 			defer csvWriter.Flush()
 
@@ -70,8 +77,56 @@ func RunDirs(vcfDir string, csvDir string) {
 	wg.Wait()
 }
 
-func initFiles(vcfPath string, csvPath string) (*os.File, *os.File) {
-	vcfFile, err := os.Open(vcfPath)
+type vcfGzipCloser struct {
+	gzipReader io.Closer
+	file       io.Closer
+}
+
+func (c *vcfGzipCloser) Close() error {
+	if err := c.gzipReader.Close(); err != nil {
+		return err
+	}
+	return c.file.Close()
+}
+
+func ReaderWithCloser(filePath string) (io.ReadCloser, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	ext := filepath.Ext(filePath)
+	if ext == ".gz" {
+		gzReader, err := gzip.NewReader(file)
+		if err != nil {
+			file.Close() // Close the file if gzip.NewReader fails
+			return nil, err
+		}
+
+		return &struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: bufio.NewReader(gzReader),
+			Closer: &vcfGzipCloser{
+				gzipReader: gzReader,
+				file:       file,
+			},
+		}, nil
+	}
+
+	// For regular files
+	return struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: bufio.NewReader(file),
+		Closer: file,
+	}, nil
+}
+
+func initFiles(vcfPath string, csvPath string) (io.ReadCloser, *os.File) {
+	vcfReader, err := ReaderWithCloser(vcfPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -81,7 +136,7 @@ func initFiles(vcfPath string, csvPath string) (*os.File, *os.File) {
 		log.Fatal(err)
 	}
 
-	return vcfFile, csvFile
+	return vcfReader, csvFile
 }
 
 func vcfsFromDir(vcfDir string) ([]string, error) {
@@ -92,7 +147,7 @@ func vcfsFromDir(vcfDir string) ([]string, error) {
 
 	vcfPaths := make([]string, 0)
 	for _, entry := range entries {
-		if entry.Type().IsRegular() && filepath.Ext(entry.Name()) == ".vcf" {
+		if entry.Type().IsRegular() && (strings.HasSuffix(entry.Name(), ".vcf") || strings.HasSuffix(entry.Name(), ".vcf.gz")) {
 			vcfPaths = append(vcfPaths, fmt.Sprintf("%s%c%s", vcfDir, os.PathSeparator, entry.Name()))
 		}
 	}
@@ -111,7 +166,8 @@ func makeOutputPaths(vcfPaths []string, csvDir string) []string {
 	csvPaths := make([]string, len(vcfPaths))
 	for i, path := range vcfPaths {
 		basename := filepath.Base(path)
-		basename = strings.TrimSuffix(basename, filepath.Ext(path))
+		basename = strings.TrimSuffix(basename, ".vcf.gz")
+		basename = strings.TrimSuffix(basename, ".vcf")
 		csvPaths[i] = fmt.Sprintf("%s%c%s%s", csvDir, os.PathSeparator, basename, ".csv")
 	}
 
