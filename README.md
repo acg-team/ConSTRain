@@ -2,6 +2,7 @@
 
 ConSTRain is a short tandem repeat (STR) variant caller that can account for copy number variants (CNVs), aneuploidies, and polyploid genomes.
 It is accurate and fast, needing less than 20 minutes to genotype >1.7 million STRs in a 100X alignment of human whole-genome sequencing reads on 32 threads.
+For more detailed information on ConSTRain, please refer to [the preprint](https://www.biorxiv.org/content/10.1101/2024.12.13.628141v1).
 
 *   [Method overview](#method-overview)
 *   [Installation](#installation)
