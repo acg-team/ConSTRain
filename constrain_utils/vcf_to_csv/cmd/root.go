@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"log"
+	"runtime"
+
 	vcfconv "github.com/maverbiest/vcfconv/pkg"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +17,13 @@ var (
 			csvPath, _ := cmd.Flags().GetString("output")
 			vcfDir, _ := cmd.Flags().GetString("directory")
 			csvDir, _ := cmd.Flags().GetString("outdir")
+
+			nThreads, _ := cmd.Flags().GetInt64("threads")
+			if nThreads > 0 {
+				runtime.GOMAXPROCS(int(nThreads))
+			} else if nThreads == 0 {
+				log.Fatal("--threads must be greater than 0 (or -1 to use all available threads)")
+			}
 
 			file := vcfPath != "" && csvPath != ""
 			dir := vcfDir != "" && csvDir != ""
@@ -38,4 +48,6 @@ func init() {
 
 	rootCmd.PersistentFlags().StringP("directory", "d", "", "directory containing VCF files. A CSV will be created for each")
 	rootCmd.PersistentFlags().StringP("outdir", "u", "", "directory where output cnvs will be generated")
+
+	rootCmd.PersistentFlags().Int64P("threads", "t", -1, "maximum number of threads to use. Set to -1 to use all available threads (default: -1)")
 }
