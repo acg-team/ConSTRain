@@ -26,4 +26,3 @@ results/
 scratch/
 .DS_Store
 hide/
-constrain_utils/vcf_to_csv/
