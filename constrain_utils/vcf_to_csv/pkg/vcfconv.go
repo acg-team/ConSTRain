@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"github.com/maverbiest/vcfconv/pkg/internal/consts"
 )
 
-func RunFiles(vcfPath string, csvPath string) {
+func RunFile(vcfPath string, csvPath string) {
 	vcfReadCloser, csvFile := initFiles(vcfPath, csvPath)
 	defer vcfReadCloser.Close()
 	defer csvFile.Close()
@@ -37,11 +38,12 @@ func RunFiles(vcfPath string, csvPath string) {
 	}
 }
 
-func RunDirs(vcfDir string, csvDir string) {
-	vcfPaths := vcfsFromDir(vcfDir)
+func RunDir(vcfDir string, csvDir string, recursive bool) {
+	vcfPaths := vcfsFromDir(vcfDir, recursive)
 	if len(vcfPaths) == 0 {
-		return
+		log.Fatalf("no VCF files found under --directory '%s'", vcfDir)
 	}
+
 	var wg sync.WaitGroup
 	wg.Add(len(vcfPaths))
 
@@ -138,20 +140,56 @@ func initFiles(vcfPath string, csvPath string) (io.ReadCloser, *os.File) {
 	return vcfReader, csvFile
 }
 
-func vcfsFromDir(vcfDir string) []string {
-	entries, err := os.ReadDir(vcfDir)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+func vcfsFromDir(vcfDir string, recursive bool) []string {
 	vcfPaths := make([]string, 0)
-	for _, entry := range entries {
-		if entry.Type().IsRegular() && (strings.HasSuffix(entry.Name(), ".vcf") || strings.HasSuffix(entry.Name(), ".vcf.gz")) {
-			vcfPaths = append(vcfPaths, fmt.Sprintf("%s%c%s", vcfDir, os.PathSeparator, entry.Name()))
+	if recursive {
+		err := filepath.Walk(vcfDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				log.Fatal(err)
+			}
+			if pathIsVcfFile(path, info.Mode()) {
+				vcfPaths = append(vcfPaths, path)
+			}
+
+			return nil
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		entries, err := os.ReadDir(vcfDir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, entry := range entries {
+			if pathIsVcfFile(entry.Name(), entry.Type()) {
+				vcfPaths = append(vcfPaths, fmt.Sprintf("%s%c%s", vcfDir, os.PathSeparator, entry.Name()))
+			}
 		}
 	}
 
+	checkDuplicatePaths(vcfPaths)
+
 	return vcfPaths
+}
+
+func pathIsVcfFile(path string, mode fs.FileMode) bool {
+	if mode.IsRegular() && (strings.HasSuffix(path, ".vcf") || strings.HasSuffix(path, ".vcf.gz")) {
+		return true
+	}
+	return false
+}
+
+func checkDuplicatePaths(vcfPaths []string) {
+	seen := make(map[string]string)
+	for _, path := range vcfPaths {
+		basename := vcfPathBasename(path)
+		other, ok := seen[basename]
+		if ok {
+			log.Fatalf("VCF files '%s' and '%s' would both make CSV file %s.csv", path, other, basename)
+		}
+		seen[basename] = path
+	}
 }
 
 func makeOutputPaths(vcfPaths []string, csvDir string) []string {
@@ -164,13 +202,19 @@ func makeOutputPaths(vcfPaths []string, csvDir string) []string {
 
 	csvPaths := make([]string, len(vcfPaths))
 	for i, path := range vcfPaths {
-		basename := filepath.Base(path)
-		basename = strings.TrimSuffix(basename, ".vcf.gz")
-		basename = strings.TrimSuffix(basename, ".vcf")
-		csvPaths[i] = fmt.Sprintf("%s%c%s%s", csvDir, os.PathSeparator, basename, ".csv")
+		basename := vcfPathBasename(path)
+		csvPaths[i] = filepath.Join(csvDir, fmt.Sprintf("%s.csv", basename))
 	}
 
 	return csvPaths
+}
+
+func vcfPathBasename(vcfPath string) string {
+	basename := filepath.Base(vcfPath)
+	basename = strings.TrimSuffix(basename, ".vcf.gz")
+	basename = strings.TrimSuffix(basename, ".vcf")
+
+	return basename
 }
 
 func writeCsv(vcfReader *vcfgo.Reader, csvWriter *csv.Writer) error {

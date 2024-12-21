@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const VERSION = "0.4.0"
+
 var (
 	fileCmd = &cobra.Command{
 		Use:   "file",
@@ -15,7 +17,7 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			vcfPath, _ := cmd.Flags().GetString("vcf")
 			csvPath, _ := cmd.Flags().GetString("output")
-			vcfconv.RunFiles(vcfPath, csvPath)
+			vcfconv.RunFile(vcfPath, csvPath)
 		},
 	}
 	dirCmd = &cobra.Command{
@@ -24,12 +26,15 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			vcfDir, _ := cmd.Flags().GetString("directory")
 			csvDir, _ := cmd.Flags().GetString("outdir")
-			vcfconv.RunDirs(vcfDir, csvDir)
+			recursive, _ := cmd.Flags().GetBool("recursive")
+
+			vcfconv.RunDir(vcfDir, csvDir, recursive)
 		},
 	}
 	rootCmd = &cobra.Command{
-		Use:   "vcf-to-csv",
-		Short: "Create CSV files from ConSTRain VCF output",
+		Use:     "vcf-to-csv",
+		Short:   "Create CSV files from ConSTRain VCF output",
+		Version: VERSION,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			nThreads, _ := cmd.Flags().GetInt64("threads")
 			if nThreads > 0 {
@@ -38,14 +43,6 @@ var (
 				log.Fatal("--threads must be greater than 0 (or -1 to use all available threads)")
 			}
 		},
-		// Run: func(cmd *cobra.Command, args []string) {
-		// 	nThreads, _ := cmd.Flags().GetInt64("threads")
-		// 	if nThreads > 0 {
-		// 		runtime.GOMAXPROCS(int(nThreads))
-		// 	} else if nThreads == 0 {
-		// 		log.Fatal("--threads must be greater than 0 (or -1 to use all available threads)")
-		// 	}
-		// },
 	}
 )
 
@@ -62,10 +59,13 @@ func init() {
 	fileCmd.Flags().StringP("output", "o", "", "output handle to use for CSV file")
 	fileCmd.MarkFlagRequired("output")
 
-	dirCmd.Flags().StringP("directory", "d", "", "directory containing VCF files. A CSV will be created for each")
+	dirCmd.Flags().StringP("directory", "d", "", "directory to search for VCF files")
 	dirCmd.MarkFlagRequired("directory")
+
+	dirCmd.Flags().BoolP("recursive", "r", false, "recursively search for VCF files in subdirectories of --directory as well (default false)")
+
 	dirCmd.Flags().StringP("outdir", "o", "", "directory where output cnvs will be generated")
 	dirCmd.MarkFlagRequired("outdir")
 
-	rootCmd.PersistentFlags().Int64P("threads", "t", -1, "maximum number of threads to use. Set to -1 to use all available threads (default: -1)")
+	rootCmd.PersistentFlags().Int64P("threads", "t", -1, "maximum number of threads to use. Set to -1 to use all available threads")
 }
