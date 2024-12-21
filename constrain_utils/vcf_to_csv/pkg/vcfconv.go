@@ -38,11 +38,10 @@ func RunFiles(vcfPath string, csvPath string) {
 }
 
 func RunDirs(vcfDir string, csvDir string) {
-	vcfPaths, err := vcfsFromDir(vcfDir)
-	if err != nil {
-		log.Fatal(err)
+	vcfPaths := vcfsFromDir(vcfDir)
+	if len(vcfPaths) == 0 {
+		return
 	}
-
 	var wg sync.WaitGroup
 	wg.Add(len(vcfPaths))
 
@@ -139,10 +138,10 @@ func initFiles(vcfPath string, csvPath string) (io.ReadCloser, *os.File) {
 	return vcfReader, csvFile
 }
 
-func vcfsFromDir(vcfDir string) ([]string, error) {
+func vcfsFromDir(vcfDir string) []string {
 	entries, err := os.ReadDir(vcfDir)
 	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
 
 	vcfPaths := make([]string, 0)
@@ -152,7 +151,7 @@ func vcfsFromDir(vcfDir string) ([]string, error) {
 		}
 	}
 
-	return vcfPaths, nil
+	return vcfPaths
 }
 
 func makeOutputPaths(vcfPaths []string, csvDir string) []string {
