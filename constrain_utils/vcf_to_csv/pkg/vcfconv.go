@@ -20,17 +20,17 @@ import (
 )
 
 func RunFile(vcfPath string, csvPath string) {
-	vcfReadCloser, csvFile := initFiles(vcfPath, csvPath)
-	defer vcfReadCloser.Close()
-	defer csvFile.Close()
+	inOut := initFilePair(vcfPath, csvPath)
+	defer inOut.vcfReader.Close()
+	defer inOut.csvFile.Close()
 
 	fmt.Println("Writing variants from", vcfPath, "to", csvPath)
 
-	vcfReader, err := vcfgo.NewReader(vcfReadCloser, false)
+	vcfReader, err := vcfgo.NewReader(inOut.vcfReader, false)
 	if err != nil {
 		log.Fatal(err)
 	}
-	csvWriter := csv.NewWriter(csvFile)
+	csvWriter := csv.NewWriter(inOut.csvFile)
 	defer csvWriter.Flush()
 
 	if err := writeCsv(vcfReader, csvWriter); err != nil {
@@ -38,7 +38,7 @@ func RunFile(vcfPath string, csvPath string) {
 	}
 }
 
-func RunDir(vcfDir string, csvDir string, recursive bool) {
+func RunDir(vcfDir string, csvDir string, nWorkers int, recursive bool) {
 	vcfPaths := vcfsFromDir(vcfDir, recursive)
 	if len(vcfPaths) == 0 {
 		log.Fatalf("no VCF files found under --directory '%s'", vcfDir)
@@ -47,35 +47,41 @@ func RunDir(vcfDir string, csvDir string, recursive bool) {
 	var wg sync.WaitGroup
 	wg.Add(len(vcfPaths))
 
-	for i, csvPath := range makeOutputPaths(vcfPaths, csvDir) {
-		go func() {
-			defer wg.Done()
-
-			vcfPath := &vcfPaths[i]
-			vcfReadCloser, csvFile := initFiles(*vcfPath, csvPath)
-			defer vcfReadCloser.Close()
-			defer csvFile.Close()
-
-			fmt.Println("Writing variants from", *vcfPath, "to", csvPath)
-
-			vcfReader, err := vcfgo.NewReader(vcfReadCloser, false)
-			if err != nil {
-				log.Fatal(err)
-			}
-			defer vcfReader.Close()
-
-			csvWriter := csv.NewWriter(csvFile)
-			defer csvWriter.Flush()
-
-			if err := writeCsv(vcfReader, csvWriter); err != nil {
-				log.Fatal(err)
-			}
-
-			fmt.Println("Finished ", *vcfPath)
-		}()
+	jobs := make(chan inOutPair, len(vcfPaths))
+	for i := 1; i <= nWorkers; i++ {
+		go worker(jobs, &wg)
 	}
 
+	for i, csvPath := range makeOutputPaths(vcfPaths, csvDir) {
+		vcfPath := &vcfPaths[i]
+		inOut := initFilePair(*vcfPath, csvPath)
+		defer inOut.vcfReader.Close()
+		defer inOut.csvFile.Close()
+
+		jobs <- inOut
+	}
+	close(jobs)
+
 	wg.Wait()
+}
+
+func worker(jobs <-chan inOutPair, wg *sync.WaitGroup) {
+	for j := range jobs {
+		vcfReader, err := vcfgo.NewReader(j.vcfReader, false)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println("Creating output file", j.csvFile.Name())
+		csvWriter := csv.NewWriter(j.csvFile)
+		if err := writeCsv(vcfReader, csvWriter); err != nil {
+			log.Fatal(err)
+		}
+
+		vcfReader.Close()
+		csvWriter.Flush()
+		wg.Done()
+	}
 }
 
 type vcfGzipCloser struct {
@@ -126,7 +132,12 @@ func ReaderWithCloser(filePath string) (io.ReadCloser, error) {
 	}, nil
 }
 
-func initFiles(vcfPath string, csvPath string) (io.ReadCloser, *os.File) {
+type inOutPair struct {
+	vcfReader io.ReadCloser
+	csvFile   *os.File
+}
+
+func initFilePair(vcfPath string, csvPath string) inOutPair {
 	vcfReader, err := ReaderWithCloser(vcfPath)
 	if err != nil {
 		log.Fatal(err)
@@ -137,7 +148,7 @@ func initFiles(vcfPath string, csvPath string) (io.ReadCloser, *os.File) {
 		log.Fatal(err)
 	}
 
-	return vcfReader, csvFile
+	return inOutPair{vcfReader, csvFile}
 }
 
 func vcfsFromDir(vcfDir string, recursive bool) []string {
