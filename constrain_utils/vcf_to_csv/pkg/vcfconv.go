@@ -1,12 +1,9 @@
 package vcfconv
 
 import (
-	"bufio"
-	"compress/gzip"
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -17,23 +14,22 @@ import (
 
 	"github.com/brentp/vcfgo"
 	"github.com/maverbiest/vcfconv/pkg/internal/consts"
+	"github.com/maverbiest/vcfconv/pkg/internal/job"
 )
 
 func RunFile(vcfPath string, csvPath string) {
-	inOut := initFilePair(vcfPath, csvPath)
-	defer inOut.vcfReader.Close()
-	defer inOut.csvFile.Close()
+	job, err := job.NewCsvConversion(csvPath, vcfPath)
+	if err != nil {
+		log.Fatalf("error setting up files: %s", err)
+	}
+	defer job.Cleanup()
 
 	fmt.Println("Writing variants from", vcfPath, "to", csvPath)
 
-	vcfReader, err := vcfgo.NewReader(inOut.vcfReader, false)
-	if err != nil {
-		log.Fatal(err)
-	}
-	csvWriter := csv.NewWriter(inOut.csvFile)
+	csvWriter := csv.NewWriter(job.CsvFile)
 	defer csvWriter.Flush()
 
-	if err := writeCsv(vcfReader, csvWriter); err != nil {
+	if err := writeCsv(job.VcfReader, csvWriter); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -47,108 +43,37 @@ func RunDir(vcfDir string, csvDir string, nWorkers int, recursive bool) {
 	var wg sync.WaitGroup
 	wg.Add(len(vcfPaths))
 
-	jobs := make(chan inOutPair, len(vcfPaths))
+	jobs := make(chan *job.CsvConversion, len(vcfPaths))
 	for i := 1; i <= nWorkers; i++ {
 		go worker(jobs, &wg)
 	}
 
 	for i, csvPath := range makeOutputPaths(vcfPaths, csvDir) {
 		vcfPath := &vcfPaths[i]
-		inOut := initFilePair(*vcfPath, csvPath)
-		defer inOut.vcfReader.Close()
-		defer inOut.csvFile.Close()
+		job, err := job.NewCsvConversion(csvPath, *vcfPath)
+		if err != nil {
+			log.Fatalf("error setting up files: %s", err)
+		}
 
-		jobs <- inOut
+		jobs <- job
 	}
 	close(jobs)
 
 	wg.Wait()
 }
 
-func worker(jobs <-chan inOutPair, wg *sync.WaitGroup) {
+func worker(jobs <-chan *job.CsvConversion, wg *sync.WaitGroup) {
 	for j := range jobs {
-		vcfReader, err := vcfgo.NewReader(j.vcfReader, false)
-		if err != nil {
-			log.Fatal(err)
+		fmt.Println("Creating output file", j.CsvPath)
+		csvWriter := csv.NewWriter(j.CsvFile)
+		if err := writeCsv(j.VcfReader, csvWriter); err != nil {
+			log.Fatalf("error writing file %s: %s", j.CsvPath, err)
 		}
 
-		fmt.Println("Creating output file", j.csvFile.Name())
-		csvWriter := csv.NewWriter(j.csvFile)
-		if err := writeCsv(vcfReader, csvWriter); err != nil {
-			log.Fatal(err)
-		}
-
-		vcfReader.Close()
+		j.Cleanup()
 		csvWriter.Flush()
 		wg.Done()
 	}
-}
-
-type vcfGzipCloser struct {
-	gzipReader io.Closer
-	file       io.Closer
-}
-
-func (c *vcfGzipCloser) Close() error {
-	if err := c.gzipReader.Close(); err != nil {
-		return err
-	}
-	return c.file.Close()
-}
-
-func ReaderWithCloser(filePath string) (io.ReadCloser, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	ext := filepath.Ext(filePath)
-	if ext == ".gz" {
-		gzReader, err := gzip.NewReader(file)
-		if err != nil {
-			file.Close() // Close the file if gzip.NewReader fails
-			return nil, err
-		}
-
-		return &struct {
-			io.Reader
-			io.Closer
-		}{
-			Reader: bufio.NewReader(gzReader),
-			Closer: &vcfGzipCloser{
-				gzipReader: gzReader,
-				file:       file,
-			},
-		}, nil
-	}
-
-	// For regular files
-	return struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: bufio.NewReader(file),
-		Closer: file,
-	}, nil
-}
-
-type inOutPair struct {
-	vcfReader io.ReadCloser
-	csvFile   *os.File
-}
-
-func initFilePair(vcfPath string, csvPath string) inOutPair {
-	vcfReader, err := ReaderWithCloser(vcfPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	csvFile, err := os.Create(csvPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return inOutPair{vcfReader, csvFile}
 }
 
 func vcfsFromDir(vcfDir string, recursive bool) []string {
@@ -245,22 +170,35 @@ func writeCsv(vcfReader *vcfgo.Reader, csvWriter *csv.Writer) error {
 		outLine[consts.GetColIdx("str_id")] = strId
 
 		sample := variant.Samples[0]
-		cn := getIntFormatField(variant, sample, "CN")
-		dp := getIntFormatField(variant, sample, "DP")
+		cn, err := getIntFormatField(variant, sample, "CN")
+		if err != nil {
+			continue
+		}
+		dp, err := getIntFormatField(variant, sample, "DP")
+		if err != nil {
+			continue
+		}
 		dpNorm := float64(dp) / float64(cn)
 		outLine[consts.GetColIdx("copy_number")] = strconv.Itoa(cn)
 		outLine[consts.GetColIdx("depth")] = strconv.Itoa(dp)
 		outLine[consts.GetColIdx("depth_norm")] = strconv.FormatFloat(dpNorm, 'f', -1, 64)
 
-		freqs := getStringFormatField(variant, sample, "FREQS")
-		if freqs != "" {
-			freqs = parseFreqString(freqs)
+		freqs, err := getStringFormatField(variant, sample, "FREQS")
+		if err != nil {
+			continue
 		}
+		freqs = parseFreqString(freqs)
 		outLine[consts.GetColIdx("frequencies")] = freqs
 
-		ft := getStringFormatField(variant, sample, "FT")
+		ft, err := getStringFormatField(variant, sample, "FT")
+		if err != nil {
+			return err
+		}
 		if ft == "PASS" {
-			gt := getStringFormatField(variant, sample, "REPLEN")
+			gt, err := getStringFormatField(variant, sample, "REPLEN")
+			if err != nil {
+				return err
+			}
 			gt = parseGtString(gt)
 			outLine[consts.GetColIdx("genotype")] = gt
 		}
@@ -271,23 +209,27 @@ func writeCsv(vcfReader *vcfgo.Reader, csvWriter *csv.Writer) error {
 	return csvWriter.Error()
 }
 
-func getIntFormatField(variant *vcfgo.Variant, sample *vcfgo.SampleGenotype, tag string) int {
+func getIntFormatField(variant *vcfgo.Variant, sample *vcfgo.SampleGenotype, tag string) (int, error) {
 	res, err := variant.GetGenotypeField(sample, tag, -1)
 	if err != nil {
-		log.Fatal(err)
+		return 0, err
+		// log.Fatal(err)
 	}
-	return res.(int)
+	return res.(int), nil
 }
 
-func getStringFormatField(variant *vcfgo.Variant, sample *vcfgo.SampleGenotype, tag string) string {
+func getStringFormatField(variant *vcfgo.Variant, sample *vcfgo.SampleGenotype, tag string) (string, error) {
 	res, err := variant.GetGenotypeField(sample, tag, "")
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return res.(string)
+	return res.(string), nil
 }
 
 func parseFreqString(freqs string) string {
+	if freqs == "" {
+		return ""
+	}
 	res := ""
 	for _, item := range strings.Split(freqs, "|") {
 		split := strings.Split(item, ",")
