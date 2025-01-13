@@ -64,8 +64,8 @@ func worker(jobs <-chan *job.CsvConversion, wg *sync.WaitGroup) {
 			log.Fatalf("error writing file %s: %s", j.CsvPath, err)
 		}
 
-		j.Cleanup()
 		csvWriter.Flush()
+		j.Cleanup()
 		wg.Done()
 	}
 }

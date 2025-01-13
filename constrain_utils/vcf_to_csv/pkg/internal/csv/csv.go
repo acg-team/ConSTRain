@@ -53,6 +53,9 @@ func WriteCsv(vcfReader *vcfgo.Reader, csvWriter *csv.Writer) error {
 		if err == nil {
 			freqs = vcf.ParseFreqString(freqs)
 			outLine[consts.GetColIdx("frequencies")] = freqs
+		} else {
+			outLine[consts.GetColIdx("frequencies")] = ""
+
 		}
 
 		if ft == "PASS" {
@@ -62,6 +65,8 @@ func WriteCsv(vcfReader *vcfgo.Reader, csvWriter *csv.Writer) error {
 			}
 			gt = vcf.ParseGtString(gt)
 			outLine[consts.GetColIdx("genotype")] = gt
+		} else {
+			outLine[consts.GetColIdx("genotype")] = ""
 		}
 
 		csvWriter.Write(outLine)
