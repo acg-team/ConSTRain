@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const VERSION = "0.4.1"
+const VERSION = "0.4.2"
 
 var (
 	fileCmd = &cobra.Command{
@@ -17,6 +17,7 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			vcfPath, _ := cmd.Flags().GetString("vcf")
 			csvPath, _ := cmd.Flags().GetString("output")
+
 			vcfconv.RunFile(vcfPath, csvPath)
 		},
 	}

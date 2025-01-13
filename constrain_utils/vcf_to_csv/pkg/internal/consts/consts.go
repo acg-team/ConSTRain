@@ -7,8 +7,23 @@ import (
 
 var header = []string{"str_id", "copy_number", "frequencies", "genotype", "depth", "depth_norm"}
 
+var skipTags = []string{"UNDEF", "DPZERO", "CNZERO", "CNMISSING"}
+
 func GetHeader() []string {
 	return header
+}
+
+func GetSkipTags() []string {
+	return skipTags
+}
+
+func IsSkipTag(tag string) bool {
+	for _, s := range skipTags {
+		if s == tag {
+			return true
+		}
+	}
+	return false
 }
 
 func GetColIdx(variable string) int {
