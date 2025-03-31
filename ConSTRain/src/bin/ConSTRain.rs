@@ -4,7 +4,7 @@ use constrain::{
     self,
     cli::{Cli, Commands},
     genotyping,
-    io::{self, InputFileType},
+    io::{self, bed::BedFile, vcf::VariantCallFile},
     utils,
 };
 use env_logger::{Builder, Env};
@@ -26,12 +26,18 @@ fn main() -> Result<()> {
         Commands::Alignment(args) => {
             // read tandem repeats from bedfile. Copy numbers will be set based on `karyotype` and
             // optionally updated from `cnvs` if it was provided
+            let repeat_source = BedFile::new(args.repeats.to_string());
+            let cnv_source = if args.cnvs.is_some() {
+                Some(BedFile::new(args.cnvs.unwrap().to_string()))
+            } else {
+                None
+            };
+
             let (mut tr_regions, observed_copy_numbers) = io::load_tandem_repeats(
-                InputFileType::Alignment(args.repeats.to_string()),
+                &repeat_source,
                 &args.karyotype,
                 args.max_cn,
-                args.cnvs.as_deref(),
-                args.sample.as_deref(),
+                cnv_source.as_ref(),
             )?;
 
             // generate partitions relevant to genotyping tandem repeats with observed copy numbers
@@ -66,12 +72,17 @@ fn main() -> Result<()> {
             io::vcf::write(&tr_regions, &target_names, &target_lengths, &sample_name)?;
         }
         Commands::VCF(args) => {
+            let repeat_source = VariantCallFile::new(args.vcf.to_string(), args.sample.to_string());
+            let cnv_source = if args.cnvs.is_some() {
+                Some(BedFile::new(args.cnvs.unwrap().to_string()))
+            } else {
+                None
+            };
             let (mut tr_regions, observed_copy_numbers) = io::load_tandem_repeats(
-                InputFileType::VCF(args.vcf.to_string()),
+                &repeat_source,
                 &args.karyotype,
                 args.max_cn,
-                args.cnvs.as_deref(),
-                Some(&args.sample),
+                cnv_source.as_ref(),
             )?;
 
             // generate partitions relevant to genotyping tandem repeats with observed copy numbers
