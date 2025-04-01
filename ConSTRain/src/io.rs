@@ -12,9 +12,14 @@ pub mod vcf;
 pub trait RepeatSource {
     /// Load tandem repeat regions into `repeat_buffer`.
     /// Copy numbers of tandem repeats should be set based on the values specified in `karyotype`. All copy number
-    /// values that are observed while reading TR regions should be added to `copy_number_buffer`, which can be used 
+    /// values that are observed while reading TR regions should be added to `copy_number_buffer`, which can be used
     /// to keep track of which integers to generate partitions for.
-    fn load_repeats(&self, karyotype: &Karyotype, repeat_buffer: &mut Vec<TandemRepeat>, copy_number_buffer: &mut HashSet<usize>) -> Result<()>;
+    fn load_repeats(
+        &self,
+        karyotype: &Karyotype,
+        repeat_buffer: &mut Vec<TandemRepeat>,
+        copy_number_buffer: &mut HashSet<usize>,
+    ) -> Result<()>;
 }
 
 pub trait CopyNumberVariantSource {
@@ -23,7 +28,10 @@ pub trait CopyNumberVariantSource {
     /// that the CNVs that are being processed (e.g., from a Bed file) are coordinate sorted.
     /// All copy number values that are observed while reading CNVs are added to `copy_number_buffer`,
     /// which can be used to keep track of which integers to generate partitions for.
-    fn load_cnvs(&self, copy_number_buffer: &mut HashSet<usize>) -> Result<HashMap<String, Vec<CopyNumberVariant>>>;
+    fn load_cnvs(
+        &self,
+        copy_number_buffer: &mut HashSet<usize>,
+    ) -> Result<HashMap<String, Vec<CopyNumberVariant>>>;
 }
 
 pub fn load_tandem_repeats<T, U>(
@@ -31,8 +39,8 @@ pub fn load_tandem_repeats<T, U>(
     karyotype: &str,
     max_cn: usize,
     cnv_source: Option<&U>,
-) -> Result<(Vec<TandemRepeat>, Vec<usize>)> 
-where 
+) -> Result<(Vec<TandemRepeat>, Vec<usize>)>
+where
     T: RepeatSource,
     U: CopyNumberVariantSource,
 {

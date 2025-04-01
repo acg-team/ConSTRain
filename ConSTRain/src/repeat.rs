@@ -6,15 +6,17 @@
 //! copy number in a specific sample. It is also associated with a [`RepeatReferenceInfo`] struct,
 //! which encodes how a repetetive region looks in the reference genome.
 //! `ConSTRain` assumes that TRs are perfect tandem repetitions of a given nucleotide motif.
-use std::collections::HashMap;
+use std::{collections::HashMap, str};
 
+use anyhow::{Context, Result};
 use log::debug;
 use ndarray::prelude::*;
+use rust_htslib::bcf::{header::HeaderView, Record};
 
 use crate::{
     cnv::CopyNumberVariant,
     karyotype::Karyotype,
-    utils::{self, VcfFilter},
+    utils::{self, vcf::VcfFilter},
 };
 
 /// `TandemRepeat` represents an observation of a tandem in an alignment.
@@ -171,6 +173,21 @@ pub struct RepeatReferenceInfo {
 }
 
 impl RepeatReferenceInfo {
+    pub fn from_bcf_record(record: &Record, header: &HeaderView) -> Result<Self> {
+        let rid = record.rid().context("Failed to get record rid")?;
+        let contig = str::from_utf8(header.rid2name(rid)?)?.to_string();
+        let end = utils::vcf::get_info_int(record, "END")?;
+        let period = utils::vcf::get_info_int(record, "PERIOD")?;
+        let unit = utils::vcf::get_info_str(record, "RU")?;
+
+        Ok(RepeatReferenceInfo {
+            seqname: contig,
+            start: record.pos(),
+            end,
+            period,
+            unit,
+        })
+    }
     pub fn get_fetch_definition(&self) -> (&str, i64, i64) {
         (self.seqname.as_str(), self.start, self.end)
     }

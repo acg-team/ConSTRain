@@ -4,7 +4,11 @@ use constrain::{
     self,
     cli::{Cli, Commands},
     genotyping,
-    io::{self, bed::BedFile, vcf::VariantCallFile},
+    io::{
+        self,
+        bed::BedFile,
+        vcf::{VariantCallFile, VariantCallFormatter},
+    },
     utils,
 };
 use env_logger::{Builder, Env};
@@ -69,7 +73,12 @@ fn main() -> Result<()> {
 
             // get contig names and lengths, write variant calls to stdout
             let (target_names, target_lengths) = utils::tnames_tlens_from_header(&args.alignment)?;
-            io::vcf::write(&tr_regions, &target_names, &target_lengths, &sample_name)?;
+            let formatter = VariantCallFormatter::from_targets_lengths(
+                &sample_name,
+                &target_names,
+                &target_lengths,
+            )?;
+            formatter.repeats_to_stdout(&tr_regions)?;
         }
         Commands::VCF(args) => {
             let repeat_source = VariantCallFile::new(args.vcf.to_string(), args.sample.to_string());
@@ -98,13 +107,21 @@ fn main() -> Result<()> {
             tr_regions.par_chunks_mut(chunksize).for_each(|tr_regions| {
                 // Main work happens in this parallel iterator
                 let tidx = rayon::current_thread_index().unwrap_or(0);
-                constrain::run_vcf(tr_regions, &partitions_map, args.min_norm_depth, args.max_norm_depth, tidx)
-                    .expect("Error during genotyping");
+                constrain::run_vcf(
+                    tr_regions,
+                    &partitions_map,
+                    args.min_norm_depth,
+                    args.max_norm_depth,
+                    tidx,
+                )
+                .expect("Error during genotyping");
             });
 
             info!("Finished genotyping");
 
-            io::vcf::write_reuse_header(&tr_regions, &args.vcf)?;
+            // create variant formatter based on input VCF file, write results to stdout
+            let formatter = VariantCallFormatter::from_vcf_file(&repeat_source)?;
+            formatter.repeats_to_stdout(&tr_regions)?;
         }
     };
 

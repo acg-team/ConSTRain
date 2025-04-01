@@ -21,7 +21,7 @@ use rust_htslib::{
     htslib::{self, htsFile},
 };
 use std::{collections::HashMap, ffi, sync::Arc};
-use utils::VcfFilter;
+use utils::vcf::VcfFilter;
 
 use crate::{repeat::TandemRepeat, utils::cigar};
 
@@ -76,8 +76,10 @@ pub fn run(
             htslib::hts_itr_destroy(itr);
         }
 
-        let pmap = Arc::clone(partitions_map); 
-        if let Err(e) = genotyping::tr_region_precheck(tr_region, min_norm_depth, max_norm_depth, &pmap) {
+        let pmap = Arc::clone(partitions_map);
+        if let Err(e) =
+            genotyping::tr_region_precheck(tr_region, min_norm_depth, max_norm_depth, &pmap)
+        {
             debug!(
                 "Locus {} failed precheck: {e:?}",
                 tr_region.reference_info.get_fetch_definition_s()
@@ -115,7 +117,9 @@ pub fn run_vcf(
             continue;
         }
         let pmap = Arc::clone(partitions_map);
-        if let Err(e) = genotyping::tr_region_precheck(tr_region, min_norm_depth, max_norm_depth, &pmap) {
+        if let Err(e) =
+            genotyping::tr_region_precheck(tr_region, min_norm_depth, max_norm_depth, &pmap)
+        {
             debug!(
                 "Locus {} failed precheck: {e:?}",
                 tr_region.reference_info.get_fetch_definition_s()

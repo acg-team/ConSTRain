@@ -6,7 +6,7 @@ use std::{cmp::Ordering, collections::HashMap, sync::Arc};
 
 use crate::{
     repeat::TandemRepeat,
-    utils::{self, VcfFilter, N_PARTITIONS},
+    utils::{self, vcf::VcfFilter, N_PARTITIONS},
 };
 
 /// Estimate the most likely underlying genotype that produced the
@@ -152,9 +152,13 @@ fn find_plateaus(arr: &Array<f32, Dim<[usize; 1]>>) -> Option<Vec<Slice>> {
     None
 }
 
-/// A check to make sure whether it is possible to try and estimate a 
+/// A check to make sure whether it is possible to try and estimate a
 /// genotype for the `TandemRepeat`, given some parameters.
-pub fn tr_region_precheck(tr_region: &mut TandemRepeat, min_norm_depth: f32, max_norm_depth: Option<f32>, pmap: &Arc<PartitionMap>,
+pub fn tr_region_precheck(
+    tr_region: &mut TandemRepeat,
+    min_norm_depth: f32,
+    max_norm_depth: Option<f32>,
+    pmap: &Arc<PartitionMap>,
 ) -> Result<()> {
     if tr_region.copy_number == 0 {
         tr_region.filter = VcfFilter::CnZero;
@@ -361,7 +365,7 @@ mod tests {
             copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
-            filter: utils::VcfFilter::Pass,
+            filter: utils::vcf::VcfFilter::Pass,
         };
         let pmap = make_partitions_map(&vec![cn]);
 
@@ -388,7 +392,7 @@ mod tests {
             copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
-            filter: utils::VcfFilter::Pass,
+            filter: utils::vcf::VcfFilter::Pass,
         };
         let pmap = make_partitions_map(&vec![cn]);
 
@@ -412,7 +416,7 @@ mod tests {
             copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
-            filter: utils::VcfFilter::Pass,
+            filter: utils::vcf::VcfFilter::Pass,
         };
         let pmap = make_partitions_map(&vec![cn]);
         let target_gt: Vec<(i64, f32)> = vec![(10, 1.), (12, 1.)];
@@ -437,7 +441,7 @@ mod tests {
             copy_number: cn,
             allele_lengths: Some(allele_lengths),
             genotype: None,
-            filter: utils::VcfFilter::Pass,
+            filter: utils::vcf::VcfFilter::Pass,
         };
         let pmap = make_partitions_map(&vec![cn]);
         let target_gt: Vec<(i64, f32)> = vec![(10, 2.)];

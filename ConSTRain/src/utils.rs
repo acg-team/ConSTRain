@@ -11,6 +11,7 @@ use std::{cmp, path::Path};
 use crate::rhtslib_reimplements;
 
 pub mod cigar;
+pub mod vcf;
 
 /// Determine the overlap between two ranges, each specified by their start
 /// and end coordinates.
@@ -121,35 +122,6 @@ pub const N_PARTITIONS: &[usize] = &[
     21637, 26015, 31185, 37338, 44583, 53174, 63261, 75175, 89134, 105_558, 124_754, 147_273,
     173_525, 204_226,
 ];
-
-/// Supported filter tags. If more variants are added,
-/// they should also be added to `VCF_FILTER_LINES` in [`crate::io::vcf`]
-#[derive(Debug)]
-pub enum VcfFilter {
-    Pass,
-    Undef, // acts as a flag to skip locus without reporting reason in final VCF file
-    DpZero,
-    DpOor,
-    CnZero,
-    CnOor,
-    CnMissing,
-    AmbGt,
-}
-
-impl VcfFilter {
-    pub fn name(&self) -> &str {
-        match self {
-            VcfFilter::Pass => "PASS",
-            VcfFilter::Undef => "UNDEF",
-            VcfFilter::DpZero => "DPZERO",
-            VcfFilter::DpOor => "DPOOR",
-            VcfFilter::CnZero => "CNZERO",
-            VcfFilter::CnOor => "CNOOR",
-            VcfFilter::CnMissing => "CNMISSING",
-            VcfFilter::AmbGt => "AMBGT",
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
