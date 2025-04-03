@@ -99,7 +99,7 @@ impl VariantCallFormatter {
         if targets.len() == 0 || targets.len() != lengths.len() {
             bail!("Number of targets and number of lengths must be equal and greater than 0");
         }
-        let header = utils::vcf::make_vcf_header(targets, lengths, sample_name);
+        let header = utils::vcf::make_bcf_header(targets, lengths, sample_name);
 
         Ok(Self { header })
     }

@@ -262,7 +262,7 @@ fn add_format_fields(record: &mut Record, repeat: &TandemRepeat) -> Result<()> {
 
 /// Construct VCF a header. First, include information about the target contigs, followed by the [`VCF_INFO_LINES`], [`VCF_FORMAT_LINES`].
 /// Then, write TR variant calls to stdout.
-pub fn make_vcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> Header {
+pub fn make_bcf_header(targets: &[String], lengths: &[u64], sample_name: &str) -> Header {
     let mut header = Header::new();
 
     for (target, length) in targets.iter().zip(lengths.iter()) {
