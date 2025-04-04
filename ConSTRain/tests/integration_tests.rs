@@ -76,12 +76,12 @@ fn check_karyotype_file() {
 #[test]
 /// Test if the returned allele lengths match the expectations.
 fn run_alignment_no_cnv_allele_lengths() {
-    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE).to_str().unwrap().into());
+    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE));
     let (mut tr_regions, observed_copy_numbers) = constrain_io::load_tandem_repeats(
         &repeat_source,
         test_data_dir().join(KARYOTYPE_FILE).to_str().unwrap(),
         20,
-        None::<&BedFile>,
+        None::<&BedFile<PathBuf>>,
     )
     .unwrap();
 
@@ -119,12 +119,12 @@ fn run_alignment_no_cnv_allele_lengths() {
 #[test]
 /// Test if the returned genotypes match the expectations.
 fn run_alignment_no_cnv_genotypes() {
-    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE).to_str().unwrap().into());
+    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE));
     let (mut tr_regions, observed_copy_numbers) = constrain_io::load_tandem_repeats(
         &repeat_source,
         test_data_dir().join(KARYOTYPE_FILE).to_str().unwrap(),
         20,
-        None::<&BedFile>,
+        None::<&BedFile<PathBuf>>,
     )
     .unwrap();
 
@@ -158,12 +158,12 @@ fn run_alignment_no_cnv_genotypes() {
 #[test]
 /// Test if the returned filter tags match the expectations.
 fn run_alignment_no_cnv_filter_tags() {
-    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE).to_str().unwrap().into());
+    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE));
     let (mut tr_regions, observed_copy_numbers) = constrain_io::load_tandem_repeats(
         &repeat_source,
         test_data_dir().join(KARYOTYPE_FILE).to_str().unwrap(),
         20,
-        None::<&BedFile>,
+        None::<&BedFile<PathBuf>>,
     )
     .unwrap();
 
@@ -191,8 +191,8 @@ fn run_alignment_no_cnv_filter_tags() {
 #[test]
 /// Test if the returned allele lengths match the expectations.
 fn run_alignment_cnv_allele_lengths() {
-    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE).to_str().unwrap().into());
-    let cnv_source = BedFile::new(test_data_dir().join(CNV_FILE).to_str().unwrap().into());
+    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE));
+    let cnv_source = BedFile::new(test_data_dir().join(CNV_FILE));
     let (mut tr_regions, observed_copy_numbers) = constrain_io::load_tandem_repeats(
         &repeat_source,
         test_data_dir().join(KARYOTYPE_FILE).to_str().unwrap(),
@@ -231,8 +231,8 @@ fn run_alignment_cnv_allele_lengths() {
 #[test]
 /// Test if the returned genotypes match the expectations.
 fn run_alignment_cnv_genotypes() {
-    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE).to_str().unwrap().into());
-    let cnv_source = BedFile::new(test_data_dir().join(CNV_FILE).to_str().unwrap().into());
+    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE));
+    let cnv_source = BedFile::new(test_data_dir().join(CNV_FILE));
     let (mut tr_regions, observed_copy_numbers) = constrain_io::load_tandem_repeats(
         &repeat_source,
         test_data_dir().join(KARYOTYPE_FILE).to_str().unwrap(),
@@ -271,8 +271,8 @@ fn run_alignment_cnv_genotypes() {
 #[test]
 /// Test if the returned filter tags match the expectations.
 fn run_alignment_cnv_filter_tags() {
-    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE).to_str().unwrap().into());
-    let cnv_source = BedFile::new(test_data_dir().join(CNV_FILE).to_str().unwrap().into());
+    let repeat_source = BedFile::new(test_data_dir().join(REPEAT_FILE));
+    let cnv_source = BedFile::new(test_data_dir().join(CNV_FILE));
     let (mut tr_regions, observed_copy_numbers) = constrain_io::load_tandem_repeats(
         &repeat_source,
         test_data_dir().join(KARYOTYPE_FILE).to_str().unwrap(),

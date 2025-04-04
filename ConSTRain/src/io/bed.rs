@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use anyhow::{bail, Context, Result};
 use csv::ReaderBuilder;
@@ -12,17 +15,17 @@ use crate::{
     utils::vcf::VcfFilter,
 };
 
-pub struct BedFile {
-    pub file_path: String,
+pub struct BedFile<P: AsRef<Path>> {
+    pub file_path: P,
 }
 
-impl BedFile {
-    pub fn new(file_path: String) -> Self {
+impl<P: AsRef<Path>> BedFile<P> {
+    pub fn new(file_path: P) -> Self {
         Self { file_path }
     }
 }
 
-impl RepeatSource for BedFile {
+impl<P: AsRef<Path>> RepeatSource for BedFile<P> {
     /// Read tandem repeat regions from the bed file at `file_path` into `repeat_buffer`.
     /// All copy number values that are encoutered while reading repeat regions are added to `copy_number_buffer`.
     fn load_repeats(
@@ -34,12 +37,20 @@ impl RepeatSource for BedFile {
         let mut bed_reader = ReaderBuilder::new()
             .has_headers(false)
             .delimiter(b'\t')
-            .from_path(self.file_path.clone())
-            .with_context(|| format!("Could not read bed file {}", self.file_path))?;
+            .from_path(&self.file_path)
+            .with_context(|| {
+                format!(
+                    "Could not read bed file {}",
+                    self.file_path.as_ref().display()
+                )
+            })?;
 
         for result in bed_reader.deserialize() {
             let ref_info: RepeatReferenceInfo = result.with_context(|| {
-                format!("Failed to deserialize bed record in {}", self.file_path)
+                format!(
+                    "Failed to deserialize bed record in {}",
+                    self.file_path.as_ref().display()
+                )
             })?;
 
             let mut tr = TandemRepeat {
@@ -58,13 +69,13 @@ impl RepeatSource for BedFile {
         info!(
             "Read {} TR regions from {}",
             repeat_buffer.len(),
-            self.file_path
+            self.file_path.as_ref().display()
         );
         Ok(())
     }
 }
 
-impl CopyNumberVariantSource for BedFile {
+impl<P: AsRef<Path>> CopyNumberVariantSource for BedFile<P> {
     /// Read copy number variants from the bed file at `self.file_path` into a HashMap and return it.
     /// HashMap keys are contig names and values are vectors of CNVs located on that contig.
     /// All copy number values that are encoutered while reader repeat regions are added to `copy_number_buffer`.
@@ -75,14 +86,22 @@ impl CopyNumberVariantSource for BedFile {
         let mut bed_reader = ReaderBuilder::new()
             .has_headers(false)
             .delimiter(b'\t')
-            .from_path(self.file_path.clone())
-            .with_context(|| format!("Could not read bed file {}", self.file_path))?;
+            .from_path(&self.file_path)
+            .with_context(|| {
+                format!(
+                    "Could not read bed file {}",
+                    self.file_path.as_ref().display()
+                )
+            })?;
 
         let mut cnv_map: HashMap<String, Vec<CopyNumberVariant>> = HashMap::new();
         let mut n = 0;
         for result in bed_reader.deserialize() {
             let cnv: CopyNumberVariant = result.with_context(|| {
-                format!("Failed to deserialize bed record in {}", self.file_path)
+                format!(
+                    "Failed to deserialize bed record in {}",
+                    self.file_path.as_ref().display()
+                )
             })?;
             copy_number_buffer.insert(cnv.cn);
             n += 1;
@@ -91,12 +110,12 @@ impl CopyNumberVariantSource for BedFile {
                 if cnv.start < prev_cnv.start {
                     bail!(
                         "CNVs in {} are unsorted. Current: {cnv:?}, previous: {prev_cnv:?}",
-                        self.file_path
+                        self.file_path.as_ref().display()
                     );
                 } else if cnv.start < prev_cnv.end - 1 {
                     bail!(
                         "Overlapping CNVs in {}. Encountered {cnv:?} and {prev_cnv:?}",
-                        self.file_path
+                        self.file_path.as_ref().display()
                     );
                 }
                 cnv_vec.push(cnv);
@@ -105,7 +124,7 @@ impl CopyNumberVariantSource for BedFile {
             }
         }
 
-        info!("Read {n} CNVS from {}", self.file_path);
+        info!("Read {n} CNVS from {}", self.file_path.as_ref().display());
 
         Ok(cnv_map)
     }

@@ -81,7 +81,7 @@ fn main() -> Result<()> {
             formatter.repeats_to_stdout(&tr_regions)?;
         }
         Commands::VCF(args) => {
-            let repeat_source = VariantCallFile::new(args.vcf.to_string(), args.sample.to_string());
+            let repeat_source = VariantCallFile::new(&args.vcf, &args.sample);
             let cnv_source = if args.cnvs.is_some() {
                 Some(BedFile::new(args.cnvs.unwrap().to_string()))
             } else {

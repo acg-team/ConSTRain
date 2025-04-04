@@ -1,4 +1,4 @@
-use std::{fs::File, io::BufReader};
+use std::{fs::File, io::BufReader, path::Path};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -12,10 +12,11 @@ use serde_json::Value;
 ///     "chrY": 0
 /// }
 /// `
-pub fn read_karyotype(path: &str) -> Result<Value> {
-    let file = File::open(path).with_context(|| format!("Could not read json {path}"))?;
+pub fn read_karyotype<P: AsRef<Path>>(path: P) -> Result<Value> {
+    let file = File::open(&path)
+        .with_context(|| format!("Could not read json {}", path.as_ref().display()))?;
     let reader = BufReader::new(file);
     let result = serde_json::from_reader(reader)
-        .with_context(|| format!("Could not deserialize json {path}"))?;
+        .with_context(|| format!("Could not deserialize json {}", path.as_ref().display()))?;
     Ok(result)
 }

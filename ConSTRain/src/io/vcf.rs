@@ -1,4 +1,4 @@
-use std::{collections::HashSet, str};
+use std::{collections::HashSet, path::Path, str};
 
 use anyhow::{bail, Context, Result};
 use log::info;
@@ -11,21 +11,21 @@ use crate::{
     utils::{self, vcf::VcfFilter},
 };
 
-pub struct VariantCallFile {
-    pub file_path: String,
+pub struct VariantCallFile<P: AsRef<Path>> {
+    pub file_path: P,
     pub sample_name: String,
 }
 
-impl VariantCallFile {
-    pub fn new(file_path: String, sample_name: String) -> Self {
+impl<P: AsRef<Path>> VariantCallFile<P> {
+    pub fn new(file_path: P, sample_name: &str) -> Self {
         Self {
             file_path,
-            sample_name,
+            sample_name: sample_name.into(),
         }
     }
 }
 
-impl RepeatSource for VariantCallFile {
+impl<P: AsRef<Path>> RepeatSource for VariantCallFile<P> {
     /// Read tandem repeat regions specified in vcf file at `self.file_path` into `repeat_buffer`.
     /// All copy number values that are encoutered while reading repeat regions are added to `copy_number_buffer`.
     fn load_repeats(
@@ -34,8 +34,12 @@ impl RepeatSource for VariantCallFile {
         repeat_buffer: &mut Vec<TandemRepeat>,
         copy_number_buffer: &mut HashSet<usize>,
     ) -> Result<()> {
-        let mut bcf = Reader::from_path(self.file_path.clone())
-            .with_context(|| format!("Failed to open VCF file at {}", self.file_path))?;
+        let mut bcf = Reader::from_path(&self.file_path).with_context(|| {
+            format!(
+                "Failed to open VCF file at {}",
+                self.file_path.as_ref().display()
+            )
+        })?;
 
         let header = bcf.header().to_owned();
         let sample_idx = header
@@ -43,13 +47,18 @@ impl RepeatSource for VariantCallFile {
             .with_context(|| {
                 format!(
                     "Sample {} not found in file {}",
-                    self.sample_name, self.file_path
+                    self.sample_name,
+                    self.file_path.as_ref().display()
                 )
             })?;
 
         for record in bcf.records() {
-            let record = record
-                .with_context(|| format!("Error reading VCF record in file {}", self.file_path))?;
+            let record = record.with_context(|| {
+                format!(
+                    "Error reading VCF record in file {}",
+                    self.file_path.as_ref().display()
+                )
+            })?;
             let ref_info = RepeatReferenceInfo::from_bcf_record(&record, &header)?;
 
             // Get allele lengths from Record, parse into hashmap
@@ -73,7 +82,7 @@ impl RepeatSource for VariantCallFile {
         info!(
             "Read {} TR regions from {}",
             repeat_buffer.len(),
-            self.file_path
+            self.file_path.as_ref().display()
         );
         Ok(())
     }
@@ -84,9 +93,13 @@ pub struct VariantCallFormatter {
 }
 
 impl VariantCallFormatter {
-    pub fn from_vcf_file(vcf: &VariantCallFile) -> Result<Self> {
-        let reader = Reader::from_path(vcf.file_path.clone())
-            .with_context(|| format!("Failed to open VCF file at {}", vcf.file_path))?;
+    pub fn from_vcf_file<P: AsRef<Path>>(vcf: &VariantCallFile<P>) -> Result<Self> {
+        let reader = Reader::from_path(&vcf.file_path).with_context(|| {
+            format!(
+                "Failed to open VCF file at {}",
+                vcf.file_path.as_ref().display()
+            )
+        })?;
         let header = Header::from_template(reader.header());
 
         Ok(Self { header })
