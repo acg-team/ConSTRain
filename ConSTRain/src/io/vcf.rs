@@ -61,19 +61,16 @@ impl<P: AsRef<Path>> RepeatSource for VariantCallFile<P> {
             })?;
             let ref_info = RepeatReferenceInfo::from_bcf_record(&record, &header)?;
 
-            // Get allele lengths from Record, parse into hashmap
+            // Generate TandemRepeat using allele lengths from the record, set the genotype to None
             let allele_freqs = utils::vcf::allele_lens_from_record(&record, sample_idx)?;
-
-            // Get GT from Record, parse into vector
-            let genotype = None;
-
             let mut tr = TandemRepeat {
                 reference_info: ref_info,
                 copy_number: 0, // placeholder copy number value
                 allele_lengths: allele_freqs,
-                genotype: genotype,
+                genotype: None,
                 filter: VcfFilter::Pass,
             };
+
             tr.set_cn_from_karyotpe(karyotype);
             copy_number_buffer.insert(tr.copy_number);
             repeat_buffer.push(tr);
