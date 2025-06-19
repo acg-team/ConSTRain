@@ -119,17 +119,67 @@ Again, you can add CNV information via the `--cnv` flag:
 ConSTRain vcf -v <VCF> -k <KARYOTYPE> -r <REPEATS> -s <SAMPLE> --cnvs <CNVs>
 ```
 
+### Examples
+Some mock input files are located in the [ConSTRain/tests/data](https://github.com/acg-team/ConSTRain/tree/main/ConSTRain/tests) folder of this repository.
+We will use these files to give some small examples of how to run ConSTRain.
+
+```bash
+ConSTRain alignment \
+    -a ConSTRain/tests/data/duplication_cn3_out1.bam \
+    -r ConSTRain/tests/data/APC_repeats.bed \
+    -k resources/h_sapiens/h_sapiens_female.json | \
+    grep "^#CHROM" -A 1 | \
+    cut -f 1,2,4,5,10
+```
+
+This will run ConSTRain on the mock input files.
+Some logging information will be printed to stderr, followed by a VCF header line and a single STR locus (we extract only a few columns using `cut` here.
+
+```bash
+#CHROM  POS     REF     ALT     FORMAT  duplication_cn3_out1
+chr5    106700  AAAAAAAAAAAAAAA AAAAAAAAAA,AAAAAAAAAAAAAAAA     GT:FT:CN:DP:FREQS:REPLEN        1/2:PASS:2:124:10,44|15,39|16,41:10,16
+```
+
+In the above output, you can see that ConSTRain estimates a biallelic genotype since we specify `chr2` to be represented by two homologues in the karyotype of this sample.
+However, we have observed three distinct repeat lengths (`REPLEN`).
+If we now run ConSTRain on the same input samples, but with the additional of CNV information indicating that this locus is actually located in an amplified region (with copy number three), we see the following:
+
+```bash
+ConSTRain alignment \
+    -a ConSTRain/tests/data/duplication_cn3_out1.bam \
+    -r ConSTRain/tests/data/APC_repeats.bed \
+    -k resources/h_sapiens/h_sapiens_female.json \
+    --cnvs ConSTRain/tests/data/cnv_test.bed | \
+    grep "^#CHROM" -A 1 | \
+    cut -f 1,2,4,5,10
+```
+
+```bash
+#CHROM  POS     REF     ALT     FORMAT  duplication_cn3_out1
+chr5    106700  AAAAAAAAAAAAAAA AAAAAAAAAA,AAAAAAAAAAAAAAAA     GT:FT:CN:DP:FREQS:REPLEN        0/1/2:PASS:3:124:10,44|15,39|16,41:10,15,16
+```
+We see that the same allele length distribution for this locus is observed as before (which makes sense), but that the interpretation is different!
+Since we have now told ConSTRain that this locus is located in an amplified region with copy number three, this same allele length distribution is now interpreted differently.
+ConSTRain now estimates that the most likely genotype for this STR consists of three different allele lengths.
+
+*NOTE: we also could have piped the output of the initial ConSTRain run to a VCF file, and then run `ConSTRain vcf` on it with the additional CNV information for the same result.*
+
+
 ## Input file formats
 ConSTRain expects alignments to adhere to [file specifications](https://samtools.github.io/hts-specs/) maintained by the GA4GH, and outputs variant calls in VCF format.
 However, specific formats are expected for other input files, which are outlined here. 
 
-*   Copy number variants: CNVs can be specified as a BED3+1 file, with the extra column indicating the (absolute!) copy number of the region affected by the CNV.
-E.g., `chr5 106680   106750   3`.
 *   Karyotype: the organism's karyotype should be specified as a JSON file mapping the names of chromosomes to their ploidies.
 E.g., `{"chr1": 2, ... "chrX": 2, "chrY: 0"}` for a human female sample, `{"chr1": 2, ... "chrX": 1, "chrY: 1"}` for a human male.
 It is critical that chromosome names in this file match chromosome names in the alignment file exactly.
 *   Repeats: the location of repeats in the reference genome should be provided as a BED3+2 file, with the two extra columns indicating the repeat unit length and the repeat unit.
 E.g., `chr5 21004   21014   2   AT` specifies a dinucleotide repeat with sequence `ATATATATAT` starting at position 21004 on chromosome 5.
+*   Copy number variants: CNVs can be specified as a BED3+1 file, with the extra column indicating the (absolute!) copy number of the region affected by the CNV.
+E.g., `chr5 106680   106750   3`.
+It is important to note that ConSTRain makes no effort to estimate the copy number of loci itself.
+To generate CNV calls, you will need to run one of the many available CNV calling tools on an alignment (or some orthogonal data modality) of the samples you're analysing.
+Alternatively, large sequencing efforts such as the [1000 Genomes project](https://www.internationalgenome.org/home) or [GTEx](https://www.gtexportal.org/home/) will provide CNV calls for the samples in their cohort.
+Such cohorts could be a good starting point if you're interested in using ConSTRain to analyse the interplay between STR variablity and CNVs.
 
 ## Command line arguments
 All of ConSTRain's command line arguments are listed here.
