@@ -129,7 +129,7 @@ ConSTRain alignment \
     -r ConSTRain/tests/data/APC_repeats.bed \
     -k resources/h_sapiens/h_sapiens_female.json | \
     grep "^#CHROM" -A 1 | \
-    cut -f 1,2,4,5,10
+    cut -f 1,2,4,5,9,10
 ```
 
 This will run ConSTRain on the mock input files.
@@ -151,7 +151,7 @@ ConSTRain alignment \
     -k resources/h_sapiens/h_sapiens_female.json \
     --cnvs ConSTRain/tests/data/cnv_test.bed | \
     grep "^#CHROM" -A 1 | \
-    cut -f 1,2,4,5,10
+    cut -f 1,2,4,5,9,10
 ```
 
 ```bash
