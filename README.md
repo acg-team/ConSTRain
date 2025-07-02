@@ -167,6 +167,7 @@ ConSTRain now estimates that the most likely genotype for this STR consists of t
 
 ## Input file formats
 ConSTRain expects alignments to adhere to [file specifications](https://samtools.github.io/hts-specs/) maintained by the GA4GH, and outputs variant calls in VCF format.
+This means that coordinates in BED files **must be** 0-based and open ended, in accordance with the BED file specification.
 However, specific formats are expected for other input files, which are outlined here. 
 
 *   Karyotype: the organism's karyotype should be specified as a JSON file mapping the names of chromosomes to their ploidies.
@@ -174,6 +175,8 @@ E.g., `{"chr1": 2, ... "chrX": 2, "chrY: 0"}` for a human female sample, `{"chr1
 It is critical that chromosome names in this file match chromosome names in the alignment file exactly.
 *   Repeats: the location of repeats in the reference genome should be provided as a BED3+2 file, with the two extra columns indicating the repeat unit length and the repeat unit.
 E.g., `chr5 21004   21014   2   AT` specifies a dinucleotide repeat with sequence `ATATATATAT` starting at position 21004 on chromosome 5.
+Please note: ConSTRain currently only considers perfect repeat loci (i.e., the repeat unit is exactly the same each time, no interruptions or mismatches).
+If you provide a custom STR reference panel, please ensure that you only specify repeats of this nature, otherwise the ConSTRain output may not accurately reflect the genotype in the samples you're analysing.
 *   Copy number variants: CNVs can be specified as a BED3+1 file, with the extra column indicating the (absolute!) copy number of the region affected by the CNV.
 E.g., `chr5 106680   106750   3`.
 It is important to note that ConSTRain makes no effort to estimate the copy number of loci itself.
